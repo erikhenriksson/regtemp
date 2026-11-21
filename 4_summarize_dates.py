@@ -18,6 +18,12 @@ shows:
     no ref      share of documents WITHOUT an HTML date where it still found
                 one: either a false positive or a date the HTML run missed
 
+Three baseline rows, "baseline/crawl year", "baseline/crawl year-1" and
+"baseline/crawl year-2", always guess the crawl date moved back by 0, 1 or
+2 years. Their year scores are what a classifier has to beat; their day
+scores are near zero by design. Above each table, "lag" shows how the
+HTML dates are spread over years before the crawl year.
+
 The first table covers all documents. The second covers only documents
 whose URL gives no date, showing what the extracted text adds on its own.
 With --by, both tables are printed per language or per main register.
@@ -37,9 +43,19 @@ import json
 import random
 from collections import defaultdict
 
-
-COLUMNS = ["found", "P day", "R day", "F1 day", "P yr", "R yr", "F1 yr",
-           "P ±1yr", "early", "jan 1", "no ref"]
+COLUMNS = [
+    "found",
+    "P day",
+    "R day",
+    "F1 day",
+    "P yr",
+    "R yr",
+    "F1 yr",
+    "P ±1yr",
+    "early",
+    "jan 1",
+    "no ref",
+]
 
 
 def ratio(part, whole):
@@ -55,7 +71,9 @@ def f1(precision, recall):
 def metrics(records, condition):
     dated = [r for r in records if r["pub_date"]]
     undated = [r for r in records if not r["pub_date"]]
-    found = [(r["dates"][condition], r["pub_date"]) for r in dated if r["dates"][condition]]
+    found = [
+        (r["dates"][condition], r["pub_date"]) for r in dated if r["dates"][condition]
+    ]
     same_day = sum(date == ref for date, ref in found)
     same_year = sum(date[:4] == ref[:4] for date, ref in found)
     near_year = sum(abs(int(date[:4]) - int(ref[:4])) <= 1 for date, ref in found)
@@ -64,13 +82,52 @@ def metrics(records, condition):
     p_yr, r_yr = ratio(same_year, len(found)), ratio(same_year, len(dated))
     return {
         "found": ratio(len(found), len(dated)),
-        "P day": p_day, "R day": r_day, "F1 day": f1(p_day, r_day),
-        "P yr": p_yr, "R yr": r_yr, "F1 yr": f1(p_yr, r_yr),
+        "P day": p_day,
+        "R day": r_day,
+        "F1 day": f1(p_day, r_day),
+        "P yr": p_yr,
+        "R yr": r_yr,
+        "F1 yr": f1(p_yr, r_yr),
         "P ±1yr": ratio(near_year, len(found)),
         "early": ratio(sum(date < ref for date, ref in wrong), len(wrong)),
         "jan 1": ratio(sum(date[5:] == "01-01" for date, _ in found), len(found)),
-        "no ref": ratio(sum(bool(r["dates"][condition]) for r in undated), len(undated)),
+        "no ref": ratio(
+            sum(bool(r["dates"][condition]) for r in undated), len(undated)
+        ),
     }
+
+
+def shift_years(date, years):
+    rest = date[4:]
+    if rest == "-02-29":
+        rest = "-02-28"
+    return f"{int(date[:4]) - years:04d}{rest}"
+
+
+def add_baselines(records, lags=(0, 1, 2)):
+    for r in records:
+        for lag in lags:
+            name = "baseline/crawl year" + (f"-{lag}" if lag else "")
+            r["dates"][name] = shift_years(r["crawl_date"], lag)
+
+
+def lag_spread(dated):
+    lags = [int(r["crawl_date"][:4]) - int(r["pub_date"][:4]) for r in dated]
+    bins = {
+        "0": lambda x: x == 0,
+        "1": lambda x: x == 1,
+        "2": lambda x: x == 2,
+        "3-5": lambda x: 3 <= x <= 5,
+        "6+": lambda x: x >= 6,
+    }
+    return (
+        ", ".join(
+            f"{name}: {sum(map(test, lags)) / len(lags):.3f}"
+            for name, test in bins.items()
+        )
+        if lags
+        else "-"
+    )
 
 
 def table(title, records, conditions, rows):
@@ -83,13 +140,21 @@ def table(title, records, conditions, rows):
         f"year of the HTML date appears in the text: "
         f"{'-' if in_text is None else f'{in_text:.3f}'}"
     )
-    print(f"{'condition':<20}" + "".join(f"{c:>8}" for c in COLUMNS))
+    print(f"lag in years before the crawl: {lag_spread(dated)}")
+    print(f"{'condition':<23}" + "".join(f"{c:>8}" for c in COLUMNS))
     for condition in conditions:
         values = metrics(records, condition)
         cells = ("-" if v is None else f"{v:.3f}" for v in values.values())
-        print(f"{condition:<20}" + "".join(f"{c:>8}" for c in cells))
-        rows.append({"table": title, "dated": len(dated), "undated": len(records) - len(dated),
-                     "condition": condition, **values})
+        print(f"{condition:<23}" + "".join(f"{c:>8}" for c in cells))
+        rows.append(
+            {
+                "table": title,
+                "dated": len(dated),
+                "undated": len(records) - len(dated),
+                "condition": condition,
+                **values,
+            }
+        )
     print()
 
 
@@ -103,28 +168,37 @@ def write_disagreements(records, conditions, path, per_condition, seed):
     rng = random.Random(seed)
     rows = []
     for c in conditions:
-        wrong = [r for r in records
-                 if r["pub_date"] and r["dates"][c] and r["dates"][c] != r["pub_date"]]
+        wrong = [
+            r
+            for r in records
+            if r["pub_date"] and r["dates"][c] and r["dates"][c] != r["pub_date"]
+        ]
         no_ref = [r for r in records if not r["pub_date"] and r["dates"][c]]
         for kind, selected in (("wrong date", wrong), ("no HTML date", no_ref)):
             for r in rng.sample(selected, min(per_condition, len(selected))):
                 found, reference = r["dates"][c], r["pub_date"]
-                rows.append({
-                    "condition": c,
-                    "kind": kind,
-                    "id": r["id"],
-                    "url": r["u"],
-                    "lang": r["lang"],
-                    "register": r["register"],
-                    "crawl_date": r["crawl_date"],
-                    "html_date": reference,
-                    "html_date_extensive": r["pub_date_extensive"],
-                    "found_date": found,
-                    "found_snippet": r["snippets"].get(found[:4]),
-                    "html_snippet": r["snippets"].get(reference[:4]) if reference else None,
-                })
+                rows.append(
+                    {
+                        "condition": c,
+                        "kind": kind,
+                        "id": r["id"],
+                        "url": r["u"],
+                        "lang": r["lang"],
+                        "register": r["register"],
+                        "crawl_date": r["crawl_date"],
+                        "html_date": reference,
+                        "html_date_extensive": r["pub_date_extensive"],
+                        "found_date": found,
+                        "found_snippet": r["snippets"].get(found[:4]),
+                        "html_snippet": r["snippets"].get(reference[:4])
+                        if reference
+                        else None,
+                    }
+                )
     with open(path, "w", encoding="utf-8", newline="") as out:
-        writer = csv.DictWriter(out, fieldnames=rows[0].keys() if rows else ["condition"])
+        writer = csv.DictWriter(
+            out, fieldnames=rows[0].keys() if rows else ["condition"]
+        )
         writer.writeheader()
         writer.writerows(rows)
     print(f"Wrote {len(rows)} rows to {path}")
@@ -135,18 +209,27 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("input", help="output of test_text_dates.py")
-    parser.add_argument("--by", choices=["lang", "register"], help="one report per group")
-    parser.add_argument("--min-docs", type=int, default=200,
-                        help="skip groups with fewer documents (with --by)")
+    parser.add_argument(
+        "--by", choices=["lang", "register"], help="one report per group"
+    )
+    parser.add_argument(
+        "--min-docs",
+        type=int,
+        default=200,
+        help="skip groups with fewer documents (with --by)",
+    )
     parser.add_argument("--metrics", help="write every table row to a CSV")
     parser.add_argument("--disagreements", help="write a CSV of disagreements to check")
-    parser.add_argument("--per-condition", type=int, default=50,
-                        help="CSV rows per condition and kind")
+    parser.add_argument(
+        "--per-condition", type=int, default=50, help="CSV rows per condition and kind"
+    )
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     with open(args.input, encoding="utf-8") as f:
         records = [json.loads(line) for line in f]
+    htmldate_conditions = list(records[0]["dates"])
+    add_baselines(records)
     conditions = list(records[0]["dates"])
 
     rows = []
@@ -165,8 +248,13 @@ def main():
             writer.writerows(rows)
         print(f"Wrote {len(rows)} rows to {args.metrics}")
     if args.disagreements:
-        write_disagreements(records, conditions, args.disagreements,
-                            args.per_condition, args.seed)
+        write_disagreements(
+            records,
+            htmldate_conditions,
+            args.disagreements,
+            args.per_condition,
+            args.seed,
+        )
 
 
 if __name__ == "__main__":
