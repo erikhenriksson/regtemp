@@ -13,13 +13,28 @@ years on the documents of one split (test by default), and writes into
                         distribution) and the crawl year; and the expected
                         calibration error. A classifier that dated documents
                         by their register would show register-specific bias.
+                        Also the share of documents whose most likely year is
+                        two or more years too early or too late, and how well
+                        the register's whole year distribution is recovered:
+                        total variation distance between its htmldate years
+                        and the summed probabilities, the most likely years
+                        and the crawl years (tvd_*), and the largest gap
+                        between the cumulative distributions (ks_*: the
+                        share published in year t or earlier, at the worst
+                        t).
     reliability.csv     per band of confidence (probability of the most
                         likely year): documents, mean confidence, accuracy
     year_distribution.csv  share of the documents in each year: htmldate,
                         summed probabilities, most likely year
+    cumulative.csv      per year t: the share of documents published in t or
+                        earlier, by htmldate and by the summed probabilities
+                        (calibration of the whole distribution, not only of
+                        the most likely year)
     calibration.json    expected calibration error (15 equal-width bands),
-                        Brier score, and the total variation distance between
-                        the htmldate year distribution and the summed
+                        Brier score, ranked probability score (of the
+                        predicted distribution and of the crawl year, scaled
+                        to 0-1), and the total variation distance between the
+                        htmldate year distribution and the summed
                         probabilities (and the most likely years)
 
     python 13_test_diagnostics.py --predictions runs/predict_400m_meta_start_all \\
@@ -83,6 +98,20 @@ def ece(confidence, correct, bands=BANDS):
     return float(np.sum(gaps))
 
 
+def year_shares(year_index, n_years, weights=None):
+    """Share of documents in each year, from year indices or probabilities."""
+    if weights is not None:
+        return weights.mean(0)
+    return np.bincount(year_index, minlength=n_years) / len(year_index)
+
+
+def distances(observed, predicted):
+    """Total variation distance and largest gap between cumulative shares."""
+    tvd = 0.5 * np.abs(observed - predicted).sum()
+    ks = np.abs(np.cumsum(observed) - np.cumsum(predicted)).max()
+    return float(tvd), float(ks)
+
+
 def main():
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -99,6 +128,9 @@ def main():
 
     df, probs, years = load(args)
     correct = (df.pred_model == df.year).to_numpy()
+    true_idx = np.searchsorted(years, df.year)
+    likely_idx = np.searchsorted(years, df.pred_model)
+    crawl_idx = np.searchsorted(years, df.crawl_year.clip(upper=years.max()))
     print(f"{len(df)} {args.split} documents")
 
     # 1. bias and accuracy per register
@@ -112,6 +144,16 @@ def main():
         if not sel.any():
             continue
         g = df[sel]
+        observed = year_shares(true_idx[sel], len(years))
+        dist_rows = {}
+        for name, pred in [
+            ("summed", year_shares(None, len(years), probs[sel])),
+            ("most_likely", year_shares(likely_idx[sel], len(years))),
+            ("crawl", year_shares(crawl_idx[sel], len(years))),
+        ]:
+            tvd, ks = distances(observed, pred)
+            dist_rows[f"tvd_{name}"], dist_rows[f"ks_{name}"] = tvd, ks
+        error = (g.pred_model - g.year).to_numpy()
         rows.append(
             {
                 "register": register,
@@ -122,7 +164,10 @@ def main():
                 "bias_expected": (g.pred_expected - g.year).mean(),
                 "bias_crawl_year": (g.crawl_year - g.year).mean(),
                 "ece": ece(g.confidence.to_numpy(), correct[sel]),
+                "early_2plus": float((error <= -2).mean()),
+                "late_2plus": float((error >= 2).mean()),
             }
+            | dist_rows
         )
     by_register = pd.DataFrame(rows)
 
@@ -144,6 +189,22 @@ def main():
     onehot = np.zeros_like(probs)
     onehot[np.arange(len(df)), np.searchsorted(years, df.year)] = 1
     brier = float(((probs - onehot) ** 2).sum(1).mean())
+    # ranked probability score: squared gaps between the cumulative
+    # distributions, summed over years and scaled to 0-1
+    k = len(years) - 1
+    rps = float(((probs.cumsum(1) - onehot.cumsum(1)) ** 2).sum(1).mean() / k)
+    crawl_onehot = np.zeros_like(probs)
+    crawl_onehot[np.arange(len(df)), crawl_idx] = 1
+    rps_crawl = float(
+        ((crawl_onehot.cumsum(1) - onehot.cumsum(1)) ** 2).sum(1).mean() / k
+    )
+    cumulative = pd.DataFrame(
+        {
+            "year": years,
+            "htmldate": onehot.mean(0).cumsum(),
+            "summed_probabilities": probs.mean(0).cumsum(),
+        }
+    )
 
     # 3. the year distribution of the split, three ways
     dist = pd.DataFrame(
@@ -165,12 +226,18 @@ def main():
         "documents": len(df),
         "ece": ece(df.confidence.to_numpy(), correct),
         "brier": brier,
+        "rps": rps,
+        "rps_crawl_year": rps_crawl,
+        "max_cumulative_gap": float(
+            (cumulative.summed_probabilities - cumulative.htmldate).abs().max()
+        ),
         "tvd_year_distribution": tvd,
     }
 
     by_register.to_csv(res("by_register.csv"), index=False)
     reliability.to_csv(res("reliability.csv"), index=False)
     dist.to_csv(res("year_distribution.csv"), index=False)
+    cumulative.to_csv(res("cumulative.csv"), index=False)
     json.dump(calibration, open(res("calibration.json"), "w"), indent=2)
 
     pd.set_option("display.width", 160)
@@ -180,7 +247,9 @@ def main():
     print(reliability.round(3).to_string(index=False))
     print(
         f"\nExpected calibration error {calibration['ece']:.3f}, "
-        f"Brier score {brier:.3f}"
+        f"Brier score {brier:.3f}, ranked probability score {rps:.4f} "
+        f"(crawl year {rps_crawl:.4f}), largest gap between the cumulative "
+        f"year distributions {calibration['max_cumulative_gap']:.3f}"
     )
     print(
         "Year distribution vs htmldate, total variation distance: "

@@ -38,6 +38,13 @@ Dating methods, whichever the documents allow:
     model_prob      the predicted probabilities: a document counts in every
                     period, in proportion to its probability for that period
 
+--run NAME=FOLDER (repeatable, with --docs dev, test or heldout) adds the
+predictions of another trained model, from the results folder of
+6_train_classifier.py or 7_logreg_baseline.py (predictions_<split>.csv,
+probabilities_<split>.npy, years.json; run with --evaluate-test for the test
+split): NAME (summed probabilities) and NAME_likely (most likely year). Only
+documents that every run has predictions for are kept.
+
 --periods takes periods such as "1995-2005,2006-2010", or "1995..2025" for
 one period per year (for 11_plot_register_trends.py). Years are clipped
 below at --min-year, as in training, and htmldate years
@@ -135,10 +142,29 @@ def load_predictions(folder):
     return df, probs, years
 
 
+def load_run(folder, splits):
+    """ids and predicted probabilities of a training run for the given splits."""
+    ids, probs = [], []
+    for s in splits:
+        csv = os.path.join(folder, f"predictions_{s}.csv")
+        npy = os.path.join(folder, f"probabilities_{s}.npy")
+        if not (os.path.exists(csv) and os.path.exists(npy)):
+            raise SystemExit(f"{folder} has no predictions for {s} ({csv}, {npy})")
+        ids += pd.read_csv(csv, usecols=["id"]).id.tolist()
+        probs.append(np.load(npy))
+    years = np.array(json.load(open(os.path.join(folder, "years.json"))))
+    return (
+        pd.DataFrame({"id": ids, "row": np.arange(len(ids))}),
+        np.vstack(probs),
+        years,
+    )
+
+
 def select(args):
     """The documents, and the period weights (documents x periods) per method."""
     periods = parse_periods(args.periods)
     pred = probs = years = None
+    runs = {}  # --run: name -> (probabilities, years)
     if args.predictions:
         pred, probs, years = load_predictions(args.predictions)
     if args.docs in ("dated", "dev", "test", "heldout"):
@@ -159,7 +185,17 @@ def select(args):
                 print(
                     "note: the model methods include the classifier's training documents"
                 )
+        for spec in args.run or []:
+            name, _, folder = spec.partition("=")
+            ids, run_probs, run_years = load_run(folder, sorted(df.split.unique()))
+            n = len(df)
+            df = df.merge(ids.rename(columns={"row": f"row_{name}"}), on="id")
+            if len(df) < n:
+                print(f"{name}: {n - len(df)} documents have no prediction, left out")
+            runs[name] = (run_probs, run_years)
     else:
+        if args.run:
+            raise SystemExit("--run needs --docs dev, test or heldout")
         if pred is None:
             raise SystemExit(f"--docs {args.docs} needs --predictions")
         df = pred if args.docs == "sample" else pred[~pred.labelled]
@@ -181,6 +217,11 @@ def select(args):
         weights["model_prob"] = probs[df.row.to_numpy()] @ period_matrix(
             np.maximum(years, args.min_year), periods
         )
+    for name, (run_probs, run_years) in runs.items():
+        p = run_probs[df[f"row_{name}"].to_numpy()]
+        weights[name] = p @ period_matrix(np.maximum(run_years, args.min_year), periods)
+        likely = np.maximum(run_years[p.argmax(1)], args.min_year)
+        weights[f"{name}_likely"] = period_matrix(likely, periods).astype(float)
     return df, weights, periods
 
 
@@ -253,6 +294,12 @@ def main():
         help="resample websites (where URLs are known) or single documents",
     )
     ap.add_argument("--seed", type=int, default=42, help="seed of the split")
+    ap.add_argument(
+        "--run",
+        action="append",
+        metavar="NAME=FOLDER",
+        help="another trained model's dev/test predictions (repeatable)",
+    )
     args = ap.parse_args()
 
     df, weights, periods = select(args)

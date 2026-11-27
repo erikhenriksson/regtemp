@@ -3,7 +3,9 @@
 Reads yearly results of 10_register_trends.py (--periods 1995..2025) for a set
 of documents dated in several ways (such as --docs heldout with
 --predictions) and compares each method with a reference method (htmldate),
-over the nine main registers and the years from --from-year on:
+over the nine main registers and the years from --from-year on. Years in
+which either method has fewer than --min-docs documents are left out, as in
+11_plot_register_trends.py:
 
     mean_diff     mean absolute difference in register share, in
                   percentage points
@@ -29,11 +31,12 @@ def main():
     ap.add_argument("--reference", default="htmldate")
     ap.add_argument("--from-year", type=int, default=2000)
     ap.add_argument("--to-year", type=int, default=2025)
+    ap.add_argument("--min-docs", type=float, default=30)
     args = ap.parse_args()
 
     df = pd.read_csv(args.csv, keep_default_na=False, dtype={"period": str})
     df = df[df.period.str.fullmatch(r"\d{4}") & df.register.isin(common.MAIN_REGISTERS)]
-    for col in ["share", "low", "high"]:
+    for col in ["share", "low", "high", "documents"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["year"] = df.period.astype(int)
     df = df[df.year.between(args.from_year, args.to_year)]
@@ -42,9 +45,11 @@ def main():
     rows = []
     for method in [m for m in df.method.unique() if m != args.reference]:
         other = df[df.method == method].set_index(["year", "register"])
-        both = ref.join(other[["share"]], rsuffix="_m", how="inner").dropna(
-            subset=["share", "share_m"]
-        )
+        both = ref.join(other[["share", "documents"]], rsuffix="_m", how="inner")
+        both = both.dropna(subset=["share", "share_m"])
+        both = both[
+            (both.documents >= args.min_docs) & (both.documents_m >= args.min_docs)
+        ]
         diff = 100 * (both.share_m - both.share)
         worst = diff.abs().idxmax()
         inside = (both.share_m >= both.low) & (both.share_m <= both.high)

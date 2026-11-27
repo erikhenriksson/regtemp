@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Date annotation</title>
+<style>
+/* Annotation tool for runs/annotation_sample_sheet.csv (14_annotation_sample.py).
+   Open this file in Chrome/Firefox from disk, load the sheet, annotate, press
+   Ctrl+S (or "Save CSV") to download the filled sheet. Progress is also kept
+   in the browser (localStorage), so closing the tab loses nothing. */
+:root{color-scheme:light dark;--bg:light-dark(#fff,#16171a);--panel:light-dark(#f4f5f7,#1f2125);
+--ink:light-dark(#15171a,#e9eaec);--muted:light-dark(#5d6470,#9aa1ab);--line:light-dark(#d9dce1,#33363c);
+--accent:#257de0;--done:#0a8a3a;--warn:#c2410c}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;height:100vh;display:grid;grid-template-columns:400px 1fr;background:var(--bg);color:var(--ink);
+font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+aside{background:var(--panel);border-right:1px solid var(--line);padding:14px 16px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+main{position:relative}
+iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+iframe.hidden{visibility:hidden}
+h1{font-size:15px;margin:0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden}.bar i{display:block;height:100%;background:var(--done)}
+.muted{color:var(--muted)}.small{font-size:12px}
+a{color:var(--accent);overflow-wrap:anywhere}
+.text{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;max-height:200px;overflow-y:auto;font-size:13px}
+.text b{background:light-dark(#fff2a8,#5a4a00)}
+input[type=text]{font:600 28px/1 ui-monospace,Menlo,monospace;width:120px;padding:6px 8px;border:2px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink)}
+input:focus{outline:none;border-color:var(--accent)}
+button{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);cursor:pointer}
+button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+button.chip{padding:2px 8px;font-family:ui-monospace,Menlo,monospace}
+.keys{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px;margin-top:auto}
+kbd{font:11px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:3px;padding:0 4px;background:var(--bg)}
+#drop{position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:5}
+#drop div{border:2px dashed var(--line);border-radius:12px;padding:40px 48px;text-align:center;max-width:520px}
+.status{font-weight:600}.status.done{color:var(--done)}.status.todo{color:var(--warn)}
+@media(max-width:800px){body{grid-template-columns:1fr;grid-template-rows:auto 60vh}}
+</style>
+</head>
+<body>
+<div id="drop"><div>
+  <h1>Date annotation</h1>
+  <p>Choose or drop <b>annotation_sample_sheet.csv</b>.</p>
+  <input type="file" id="file" accept=".csv">
+  <p class="muted small">Saved progress for the same file name is restored automatically.</p>
+</div></div>
+
+<aside>
+  <div class="row"><h1 id="pos">–</h1><span id="status" class="status"></span><span class="muted small" id="count"></span></div>
+  <div class="bar"><i id="prog" style="width:0"></i></div>
+  <div class="row small"><span class="muted">Crawled</span><b id="crawl"></b><span class="muted">Registers</span><b id="regs"></b></div>
+  <div class="small"><a id="url" target="_blank" rel="noopener"></a></div>
+  <div class="row small"><a id="wb" target="_blank" rel="noopener">Wayback (o)</a><a id="live" target="_blank" rel="noopener">Live page (l)</a></div>
+  <div class="text" id="text"></div>
+  <div class="row small" id="chips"></div>
+  <div class="row">
+    <label for="year" class="muted">Year</label>
+    <input type="text" id="year" inputmode="numeric" maxlength="4" autocomplete="off">
+  </div>
+  <div class="row small" id="types">
+    <span class="muted">Date is</span>
+    <button data-t="">published</button><button data-t="updated">updated (u)</button>
+    <button data-t="copyright">copyright (c)</button><button data-t="none">no date (n)</button>
+  </div>
+  <div class="row small" id="regok">
+    <span class="muted">Registers right?</span>
+    <button data-r="yes">yes (y)</button><button data-r="no">no (r)</button><button data-r="unsure">unsure</button>
+  </div>
+  <div class="row"><button id="prev">← Prev</button><button id="next" class="on">Next →</button><button id="todo">Next empty (j)</button><button id="save">Save CSV</button></div>
+  <div class="keys">
+    Type the year, <kbd>Enter</kbd> = save &amp; next, <kbd>Shift</kbd>+<kbd>Enter</kbd> = back.
+    <kbd>u</kbd> updated, <kbd>c</kbd> copyright, <kbd>n</kbd> no date, <kbd>p</kbd> published,
+    <kbd>y</kbd>/<kbd>r</kbd> registers right/wrong, <kbd>o</kbd> Wayback tab, <kbd>l</kbd> live page,
+    <kbd>j</kbd> next empty, <kbd>Ctrl</kbd>+<kbd>S</kbd> save CSV. Click a year chip to use it.
+    Only an update or copyright year? Enter it and mark the type.
+  </div>
+</aside>
+<main><iframe id="f0" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe><iframe id="f1" class="hidden" referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe></main>
+
+<script>
+{
+const $ = id => document.getElementById(id);
+const NAMES = {MT:"machine transl.",LY:"lyrical",SP:"spoken",ID:"discussion",NA:"narrative",HI:"how-to",IN:"info. description",OP:"opinion",IP:"persuasion"};
+let header = [], rows = [], i = 0, fileName = "annotation_sample_sheet.csv";
+
+function parseCSV(s) {
+  if (s.charCodeAt(0) === 0xfeff) s = s.slice(1);
+  const out = []; let row = [], f = "", q = false;
+  for (let k = 0; k < s.length; k++) {
+    const ch = s[k];
+    if (q) { if (ch === '"') { if (s[k + 1] === '"') { f += '"'; k++; } else q = false; } else f += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ",") { row.push(f); f = ""; }
+    else if (ch === "\n" || ch === "\r") { if (ch === "\r" && s[k + 1] === "\n") k++; row.push(f); out.push(row); row = []; f = ""; }
+    else f += ch;
+  }
+  if (f !== "" || row.length) { row.push(f); out.push(row); }
+  return out.filter(r => r.length > 1 || r[0] !== "");
+}
+const cell = v => /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+const toCSV = () => "﻿" + [header, ...rows.map(r => header.map(h => r[h] ?? ""))].map(r => r.map(cell).join(",")).join("\r\n") + "\r\n";
+
+const key = () => "annotate:" + fileName;
+function store() { try { localStorage.setItem(key(), JSON.stringify(rows.map(r => [r.item, r.manual_year, r.date_type, r.register_ok]))); } catch (e) {} }
+function restore() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key()) || "[]"), byItem = new Map(saved.map(s => [s[0], s]));
+    for (const r of rows) { const s = byItem.get(r.item); if (s && !r.manual_year && !r.date_type && !r.register_ok) [, r.manual_year, r.date_type, r.register_ok] = s; }
+  } catch (e) {}
+}
+
+const done = r => /^\d{4}$/.test(r.manual_year || "") || r.date_type === "none";
+const wayback = r => r.wayback.replace(/\/web\/(\d+)\//, "/web/$1if_/");  // without the Wayback toolbar
+const esc = s => s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const yearsIn = s => [...new Set((s.match(/(?<!\d)(19[89]\d|20[0-2]\d)(?!\d)/g) || []))].sort().reverse();
+
+let shown = 0;  // which iframe is visible
+function frames(k) {
+  const f = [$("f0"), $("f1")], cur = f[shown], other = f[1 - shown], want = wayback(rows[k]);
+  if (other.dataset.src === want) { other.classList.remove("hidden"); cur.classList.add("hidden"); shown = 1 - shown; }
+  else if (cur.dataset.src !== want) { cur.src = want; cur.dataset.src = want; }
+  const nxt = rows[k + 1], hid = f[1 - shown];
+  if (nxt && hid.dataset.src !== wayback(nxt)) { hid.src = wayback(nxt); hid.dataset.src = wayback(nxt); }  // preload the next one
+}
+
+function render() {
+  const r = rows[i], n = rows.filter(done).length;
+  $("pos").textContent = `Item ${r.item}  (${i + 1} / ${rows.length})`;
+  $("count").textContent = `${n} done`;
+  $("prog").style.width = (100 * n / rows.length) + "%";
+  $("status").textContent = done(r) ? "✓ done" : "to do"; $("status").className = "status " + (done(r) ? "done" : "todo");
+  $("crawl").textContent = r.crawl_date;
+  $("regs").textContent = (r.registers || "").split(" ").map(c => `${c} ${NAMES[c] || ""}`.trim()).join(", ");
+  $("url").textContent = r.url; $("url").href = r.url; $("live").href = r.url; $("wb").href = r.wayback;
+  const ys = yearsIn((r.url || "") + " " + (r.text_start || ""));
+  $("text").innerHTML = esc(r.text_start || "").replace(/(?<!\d)(19[89]\d|20[0-2]\d)(?!\d)/g, "<b>$1</b>");
+  $("chips").innerHTML = ys.length ? '<span class="muted">Years seen:</span>' + ys.map(y => `<button class="chip" data-y="${y}">${y}</button>`).join("") : "";
+  $("year").value = r.manual_year || "";
+  for (const b of $("types").querySelectorAll("button")) b.classList.toggle("on", (r.date_type || "") === b.dataset.t);
+  for (const b of $("regok").querySelectorAll("button")) b.classList.toggle("on", r.register_ok === b.dataset.r);
+  frames(i);
+  $("year").focus(); $("year").select();
+}
+
+function commit() { const v = $("year").value.trim(); rows[i].manual_year = /^\d{4}$/.test(v) ? v : ""; if (v && rows[i].date_type === "none") rows[i].date_type = ""; store(); }
+function go(k) { commit(); i = Math.max(0, Math.min(rows.length - 1, k)); render(); }
+function setType(t) { commit(); rows[i].date_type = t; if (t === "none") { rows[i].manual_year = ""; $("year").value = ""; } store(); render(); }
+function setReg(v) { commit(); rows[i].register_ok = rows[i].register_ok === v ? "" : v; store(); render(); }
+function nextEmpty() { commit(); for (let d = 1; d <= rows.length; d++) { const k = (i + d) % rows.length; if (!done(rows[k])) { i = k; render(); return; } } render(); }
+function save() {
+  commit();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([toCSV()], {type: "text/csv"})); a.download = fileName; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function load(file) {
+  fileName = file.name;
+  file.text().then(t => {
+    const data = parseCSV(t); header = data[0];
+    for (const c of ["manual_year", "date_type", "register_ok"]) if (!header.includes(c)) header.push(c);
+    rows = data.slice(1).map(v => Object.fromEntries(header.map((h, k) => [h, v[k] ?? ""])));
+    restore(); store();
+    i = Math.max(0, rows.findIndex(r => !done(r))); $("drop").style.display = "none"; render();
+  });
+}
+
+// The pages are sandboxed so that a click inside them cannot take over this tab;
+// if the tab is left anyway, the browser asks first.
+window.addEventListener("beforeunload", e => { if (rows.length) { commit(); e.preventDefault(); e.returnValue = ""; } });
+
+$("file").addEventListener("change", e => e.target.files[0] && load(e.target.files[0]));
+document.addEventListener("dragover", e => e.preventDefault());
+document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files[0]) load(e.dataTransfer.files[0]); });
+$("prev").onclick = () => go(i - 1); $("next").onclick = () => go(i + 1);
+$("todo").onclick = nextEmpty; $("save").onclick = save;
+$("types").onclick = e => { const b = e.target.closest("button"); if (b) setType(b.dataset.t); };
+$("regok").onclick = e => { const b = e.target.closest("button"); if (b) setReg(b.dataset.r); };
+$("chips").onclick = e => { const b = e.target.closest("button"); if (b) { $("year").value = b.dataset.y; commit(); render(); } };
+$("year").addEventListener("input", e => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 4); });
+
+document.addEventListener("keydown", e => {
+  if (!rows.length) return;
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") { e.preventDefault(); save(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === "Enter") { e.preventDefault(); go(e.shiftKey ? i - 1 : i + 1); return; }
+  const k = e.key.toLowerCase(), act = {u: () => setType("updated"), c: () => setType("copyright"), n: () => setType("none"),
+    p: () => setType(""), y: () => setReg("yes"), r: () => setReg("no"), j: nextEmpty,
+    o: () => window.open(rows[i].wayback, "_blank"), l: () => window.open(rows[i].url, "_blank")}[k];
+  if (act) { e.preventDefault(); act(); }
+});
+window.addEventListener("beforeunload", () => { if (rows.length) { commit(); } });
+}
+</script>
+</body>
+</html>

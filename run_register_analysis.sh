@@ -46,6 +46,7 @@ python 11_plot_register_trends.py --line htmldate=runs/years_dated.csv:htmldate 
 
 # comparisons with htmldate, by year
 python compare_trends.py runs/years_heldout.csv --from-year 2000
+python compare_trends.py runs/years_heldout.csv --from-year 2011
 python compare_trends.py runs/years_dated.csv --from-year 2000
 
 # test-set diagnostics, age of the sample, annotation sample

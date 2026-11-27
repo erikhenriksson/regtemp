@@ -77,7 +77,11 @@ the repo's `6_train_classifier.py` is the latest version of the same script.
   in 29.2 min (0.19 docs/s), 5 failed; projection for 10M documents 18.7 days
   (Common Crawl) and 67.6 days (Wayback). The 11.3% Internet Archive share
   is 339/3,000. The **52 days** at the full reported limit is computed:
-  10M × 11.1% Internet Archive documents ÷ 15 requests per minute.
+  10M × 11.3% Internet Archive documents (the timed share, as in the
+  68-day projection) ÷ 15 requests per minute.
+- **"58.5% of the undated vs 46.7% of the test documents get the crawl
+  year"** (Discussion): the last line of the `8_undated_estimate.py` log
+  ("Predicted crawl year itself").
 - **Pauses** (0.5 s Common Crawl, 4 s Wayback, index one at a time): settings
   in `0_time_fetch.py` and `1_fetch_html.py` (`BASE_PAUSE`).
 - **htmldate speed (46 documents per second per core, 61 core-hours per 10M):**
@@ -100,7 +104,60 @@ are not independent). The paper figures are then in `runs/paper_*/paper.pdf`
 htmldate in the job's log (`compare_trends.py`), the test diagnostics in
 `runs/test_diagnostics/`, and the annotation sample in
 `runs/annotation_sheet.csv` (to fill in) and `runs/annotation_key.csv`.
-After annotating: `python 15_score_annotation.py runs/annotation_sheet.csv runs/annotation_key.csv`.
+The filled-in sheet is `runs/annotation_sample_sheet_196.csv` (annotated
+in `annotate.html`, all 196 items); score it with
+`python 15_score_annotation.py runs/annotation_sample_sheet_196.csv runs/annotation_key.csv`.
+It prints every table twice, with all manual years and with copyright
+years counted as no date, and the weighted overall rows with 95% bootstrap
+intervals (seed 42). In the paper (section How Accurate htmldate Is,
+`tab:validation`, abstract, introduction, Limitations "Labels"):
+  - `tab:validation` (85.9 / 62.7 / 33.1, intervals, within one year) and
+    "58%, 48–68%": the weighted overall rows of the "Copyright years counted
+    as no date" table.
+  - "112 of 196": its unweighted `found` (0.571 × 196). "7 of 10"
+    (machine translated) and "22 of 29" (up to 2010): its MT and -2010 rows
+    (`found` × 28 or 49 gives the dated documents).
+  - "8 of the 22" copyright years: the "Accuracy by date type" table.
+  - "181 of 196 (92%)" and "88–96% in each period": `register_ok` in the
+    sheet and the scorer's "Register labels judged correct, by period"
+    table. A document was marked right only if all its predicted main
+    registers matched the page; the tool showed main registers only.
+  - "Accuracy from 41.9% (discussion) to 67.7% (narrative)" and "within
+    four points" (calibration): `runs/test_diagnostics/by_register.csv`
+    (`exact`) and `reliability.csv`.
+
+### Second review (other dating models, whole distributions, dateability)
+
+Do the register shares need the neural model? `10_register_trends.py --run
+NAME=FOLDER` adds the dev/test predictions of any trained run (summed
+probabilities as NAME, most likely year as NAME_likely). Two runs are needed:
+
+    # metadata-only 400M model, scored on dev and test (GPU, minutes)
+    sbatch --account=project_462001491 --partition=small-g --gpus-per-node=1 \
+        --cpus-per-task=7 --mem=60G --time=01:00:00 --output=runs/meta_only_%j.out \
+        --wrap "source ./setup_lumi.sh && python 6_train_classifier.py \$DATA/hplt.dated.jsonl \
+        --trained \$DATA/runs/400m_meta_only_rich/best_model \
+        --results runs/test_400m_meta_only_rich --evaluate-test"
+    # logistic regression, now saving its probabilities (CPU)
+    sbatch --account=project_462001491 --partition=small --cpus-per-task=8 \
+        --mem=64G --time=06:00:00 --output=runs/logreg_%j.out \
+        --wrap "source ./setup_lumi.sh && python 7_logreg_baseline.py \$DATA/hplt.dated.jsonl \
+        --results runs/logreg_probs --c C --evaluate-test"
+
+(C: `best_c` in `$DATA/runs/test_logreg/config.json`.) Then
+`sbatch run_review2.sh` writes `runs/years_heldout_models.csv` and
+`runs/years_test_models.csv` with their comparisons with htmldate in the log,
+the test diagnostics with the whole predicted distribution
+(`runs/test_diagnostics/`: ranked probability score, cumulative
+calibration in `cumulative.csv`, per-register distances between year
+distributions in `by_register.csv`), and `runs/dateability.csv` (share of
+documents htmldate dated, by register and crawl period).
+
+The htmldate errors in the manual sample (16 of the 112 documents with a
+visible date: 8 too late, 8 too early) are listed by comparing
+`runs/annotation_sample_sheet_196.csv` with `runs/annotation_key.csv`
+(documents whose `manual_year` differs from the year of `pub_date`, without
+copyright years and "none").
 
 ### Registers
 
@@ -233,9 +290,17 @@ outputs above:
   `--docs dated` run (left) and the `model_prob` table printed by the
   `--docs unlabelled` run (right), both with the default periods. The same
   numbers are in `runs/registers_dated.csv` and `runs/registers_unlabelled.csv`.
-- **Table `tab:register-same`** (mean difference 1.0 / 1.6 / 1.8 points; in
-  interval 90 / 87 / 81%): `python compare_trends.py runs/years_heldout.csv --from-year 2000`
-  (`model_prob`, `model_median`, `model`).
+- **Table `tab:register-same`** (2011–2025, the years crawl dates cover;
+  mean difference 0.5 / 0.8 / 1.0 / 2.3 points; in interval 97 / 86 / 79 /
+  45%): `python compare_trends.py runs/years_heldout.csv --from-year 2011`
+  (`model_prob`, `model_median`, `model`, `crawl`; years in which either
+  method has fewer than 30 documents are left out, `--min-docs`, as in the
+  figures). The text's "1.0 points … 89% over 2000–2025" for summed
+  probabilities: the same with `--from-year 2000` (`model_prob`). Both are
+  in the `register_analysis_*.out` log of later runs.
+- **Bootstrap over websites** ("103,934 dated documents come from 82,528
+  websites"): printed by `10_register_trends.py --docs dated` (the
+  "bootstrap over … websites" line in the log).
 - **Yearly numbers in the text** (narrative 39% in 2000, 50% in 2009–2013,
   20% in 2025; narrative blogs 15% in 2009; news reports 27% in 2013, 15% in
   2025; opinion 21% in 2007, 8% in 2025; opinion blogs 8% in 2007;
@@ -245,6 +310,33 @@ outputs above:
   2018): the `htmldate` rows of `runs/years_dated.csv` and, for
   subregisters, `runs/years_dated_sub.csv`. "Fewer than 300 documents a
   year before 2004": the `documents` column of `runs/years_dated.csv`.
+- **Section Register Trends with Crawl Dates** (`fig:registers-crawl` =
+  `runs/paper_crawl/paper.pdf`, uploaded as `figures/registers_crawl_dates.pdf`):
+
+      python 11_plot_register_trends.py --line htmldate=runs/years_dated.csv:htmldate --line "crawl date=runs/years_dated.csv:crawl" --registers NA,IN,IP,ID --from-year 2000 --out runs/paper_crawl
+
+  - "narrative 43.8% vs 37.6%, informational description 39.6% vs 48.6% in
+    2016–2019": the `crawl` and `htmldate` rows of `runs/registers_dated.csv`
+    (NA, IN, period 2016-2019).
+  - "2.3 points on average, only 23% inside": `python compare_trends.py runs/years_dated.csv --from-year 2000`
+    (`crawl`, 126 cells, 2011–2025).
+- **Bias, calibration** (`tab:bias` in the appendix, and the two paragraphs
+  after "Counting each document in its most likely year"):
+  `python 13_test_diagnostics.py --predictions runs/predict_400m_meta_start_all --dated $DATA/hplt.dated.jsonl --results runs/test_diagnostics`
+  - `tab:bias`: `runs/test_diagnostics/by_register.csv` (`exact`,
+    `bias_most_likely`, `bias_expected`, `bias_crawl_year`). "−0.37 … 0.08",
+    "0.15 … 0.88" and "1.4 … 5.1" are the ranges of these columns over the
+    nine main registers.
+  - "expected calibration error 0.014": `ece` in
+    `runs/test_diagnostics/calibration.json` (15 bands; the curve is
+    `reliability.csv`). "Total variation distance 0.042 against 0.077": the
+    same file, from `year_distribution.csv`.
+- **Discussion, Implications** ("narrative falls from 48% to 27%,
+  informational persuasion rises from 4% to 22%" between 2006–2010 and
+  2020–2025): `htmldate` rows of `runs/registers_dated.csv` (NA, IP). "Half
+  or more of the discussion pages … about a tenth of the commercial pages":
+  the "Share six or more years old by register and crawl year" table of
+  `12_age_of_sample.py` (ID, IP, 2021–2025).
 - **ed never reaches the threshold**: `11_plot_register_trends.py` prints
   "IP: no document has ed; left out" for the dated documents.
 

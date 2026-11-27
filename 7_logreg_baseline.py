@@ -8,8 +8,10 @@ Features: TF-IDF of words and word pairs in the beginning of the text
 (one-hot). The model predicts the publication year, never later than the
 crawl year. The regularisation strength C is chosen on dev from --c.
 
-Writes metrics.csv, by_register.csv and predictions_<split>.csv into --results.
-Test is only scored with --evaluate-test.
+Writes metrics.csv, by_register.csv, predictions_<split>.csv and
+probabilities_<split>.npy (one row per document, one column per year in
+years.json, as 6_train_classifier.py) into --results. Test is only scored
+with --evaluate-test.
 
     python 7_logreg_baseline.py hplt.dated.jsonl --results runs/logreg
 """
@@ -121,7 +123,9 @@ def main():
     all_metrics, all_by_register = [], []
     for s in ["dev", "test"] if args.evaluate_test else ["dev"]:
         d = parts[s]
-        for col, v in common.predictions(capped(model, s), years).items():
+        probs = capped(model, s)
+        np.save(res(f"probabilities_{s}.npy"), probs.astype(np.float32))
+        for col, v in common.predictions(probs, years).items():
             d[col] = v
         common.add_baselines(d, train)
         d["pred_url_or_model"] = d.pred_url.fillna(d.pred_model)
@@ -134,6 +138,8 @@ def main():
 
     pd.concat(all_metrics).to_csv(res("metrics.csv"), index=False)
     pd.concat(all_by_register).to_csv(res("by_register.csv"), index=False)
+    with open(res("years.json"), "w") as f:
+        json.dump(years.tolist(), f)
     with open(res("config.json"), "w") as f:
         json.dump(
             vars(args) | {"best_c": best_c, "train_documents": len(train)}, f, indent=2
