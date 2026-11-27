@@ -31,6 +31,8 @@ Documents (--docs):
 Dating methods, whichever the documents allow:
 
     htmldate        htmldate's fast-mode year (the labels)
+    crawl           the crawl year, as if documents were published when crawled
+                    (what studies get that date documents by their crawl)
     model           the classifier's most likely year
     model_median    the median of the predicted distribution
     model_prob      the predicted probabilities: a document counts in every
@@ -40,8 +42,12 @@ Dating methods, whichever the documents allow:
 one period per year (for 11_plot_register_trends.py). Years are clipped
 below at --min-year, as in training, and htmldate years
 after the crawl year are left out, as in classifier_common.load. The 95%
-intervals come from a Poisson bootstrap over documents: they show sampling
-uncertainty, not the classifier's dating error.
+intervals come from a Poisson bootstrap that resamples websites
+(--bootstrap-by website, the default where the URLs are known, that is for
+dated documents), so that documents from the same website count as one
+cluster, or single documents (--bootstrap-by document; always for --docs
+sample and unlabelled, whose URLs are not in the predictions). They show
+sampling uncertainty, not the classifier's dating error.
 
 Prints a table per method (shares in %, one column per period), and with
 htmldate and a model method on the same documents, their difference in
@@ -106,7 +112,13 @@ def load_dated(path, seed, min_year):
             continue
         scores = doc.get("web-register") or {}
         rows.append(
-            {"id": doc["id"], "year": year, "split": common.split_of(doc["id"], seed)}
+            {
+                "id": doc["id"],
+                "year": year,
+                "crawl_year": crawl_year,
+                "website": common.website(doc["u"]),
+                "split": common.split_of(doc["id"], seed),
+            }
             | {r: scores.get(r, np.nan) for r in REGISTERS}
         )
     print(f"{len(rows)} dated documents ({too_late} dated after their crawl left out)")
@@ -160,6 +172,8 @@ def select(args):
     weights = {}
     if "year" in df:
         weights["htmldate"] = period_matrix(df.year, periods).astype(float)
+    crawl = df.crawl_year.clip(lower=args.min_year)
+    weights["crawl"] = period_matrix(crawl, periods).astype(float)
     if pred is not None:
         for m in ("model", "model_median"):
             year = df[f"pred_{m}"].clip(lower=args.min_year)
@@ -196,12 +210,18 @@ def shares(w, member, v=None):
         return (w.T @ member) / w.sum(0)[:, None]
 
 
-def trends(w, member, n_boot, rng):
+def trends(w, member, n_boot, rng, clusters):
+    """Shares and 95% intervals; clusters gives each document's cluster index
+    (its website, or itself), and the bootstrap resamples clusters."""
     point = shares(w, member)
     if not n_boot:
         return point, point * np.nan, point * np.nan
+    n_clusters = clusters.max() + 1
     boot = np.stack(
-        [shares(w, member, rng.poisson(1.0, len(w))) for _ in range(n_boot)]
+        [
+            shares(w, member, rng.poisson(1.0, n_clusters)[clusters])
+            for _ in range(n_boot)
+        ]
     )
     with warnings.catch_warnings():  # periods without documents
         warnings.simplefilter("ignore", RuntimeWarning)
@@ -226,6 +246,12 @@ def main():
     ap.add_argument("--periods", default=DEFAULT_PERIODS)
     ap.add_argument("--min-year", type=int, default=1995)
     ap.add_argument("--bootstrap", type=int, default=200, help="0: no intervals")
+    ap.add_argument(
+        "--bootstrap-by",
+        choices=["website", "document"],
+        default="website",
+        help="resample websites (where URLs are known) or single documents",
+    )
     ap.add_argument("--seed", type=int, default=42, help="seed of the split")
     args = ap.parse_args()
 
@@ -236,11 +262,17 @@ def main():
         f"{len(df)} documents ({args.docs}), {args.level} registers at threshold "
         f"{args.threshold}; {hybrid:.1%} are hybrids (two or more main registers)"
     )
+    if args.bootstrap_by == "website" and "website" in df:
+        clusters = pd.factorize(df.website)[0]
+        print(f"bootstrap over {clusters.max() + 1} websites")
+    else:
+        clusters = np.arange(len(df))
+        print("bootstrap over documents")
     rng = np.random.default_rng(0)
     rows, tables = [], {}
     pd.set_option("display.width", 160)
     for method, w in weights.items():
-        point, low, high = trends(w, member, args.bootstrap, rng)
+        point, low, high = trends(w, member, args.bootstrap, rng, clusters)
         docs = w.sum(0)
         outside = len(df) - docs.sum()
         for i, period in enumerate(names):
@@ -251,6 +283,9 @@ def main():
                         "method": method,
                         "level": args.level,
                         "threshold": args.threshold,
+                        "bootstrap_by": (
+                            "website" if clusters.max() + 1 < len(df) else "document"
+                        ),
                         "period": period,
                         "register": register,
                         "documents": docs[i],

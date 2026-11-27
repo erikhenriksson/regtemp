@@ -239,6 +239,20 @@ def main():
         by_crawl[f"share_{b}"] = (100 * by_crawl[f"share_{b}"]).round(1)
     print("\nAge at crawl by crawl year, all documents:")
     print(by_crawl.round(2).to_string(index=False))
+    print("\nMedian publication year and share published up to 2015:")
+    for source, g in d.groupby("source"):
+        g = g.sort_values("year")
+        median = int(g.year.iloc[(g.share.cumsum() >= 0.5).argmax()])
+        early = 100 * g[g.year <= 2015].share.sum()
+        print(f"  {source}: median {median}, up to 2015 {early:.1f}%")
+    within = age[(age.source == "classifier") & (age.crawl_year != "all")]
+    print("\nShare six or more years old (%), by register and crawl year (classifier):")
+    print(
+        within.pivot(index="register", columns="crawl_year", values="share_6+")
+        .mul(100)
+        .round(1)
+        .to_string()
+    )
     print(f"\nAll results in {args.results}/")
 
 

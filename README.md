@@ -20,6 +20,9 @@ how web registers change over time.
 | `8_undated_estimate.py` | estimates the classifier's accuracy on documents htmldate could not date |
 | `9_predict_years.py` | dates any HPLT file (e.g. all of `samples.jsonl`) with a trained classifier: most likely year, median, confidence, the full distribution over years; marks the htmldate-labelled lines and their split |
 | `11_plot_register_trends.py` | yearly register plots from step 10: one panel per main register, with its subregisters, or several dating methods compared |
+| `13_test_diagnostics.py` | test-set checks: bias per register (does the classifier date registers differently?), calibration (ECE, reliability, Brier), and the year distribution from summed probabilities vs htmldate |
+| `14_annotation_sample.py`, `15_score_annotation.py` | a blind, stratified sample of held-out documents to date by hand, and its scoring (htmldate and classifier vs manual years) |
+| `run_register_analysis.sh` | batch job that reruns all register, age, diagnostic and annotation-sample steps (`sbatch run_register_analysis.sh`) |
 | `12_age_of_sample.py` | how old the sample's documents are: publication-year distribution, and age at crawl per main register and crawl year (classifier for the whole sample, htmldate for the dated documents) |
 | `10_register_trends.py` | shares of the main registers by publication period, with htmldate years, classifier years (most likely, median, summed probabilities) or both on the same documents; bootstrap intervals |
 | `0_time_fetch.py` | times retrieval as fast as the servers allow (cost of retrieving HTML) |
@@ -85,6 +88,19 @@ the repo's `6_train_classifier.py` is the latest version of the same script.
   (127.8 dev, 142.1 test; one MI250X GCD, 512 tokens, model only).
 - **Split (83,285 / 10,307 / 10,342):** printed by `6_train_classifier.py`
   (hash of the document id, seed 42, `classifier_common.split_of`).
+
+### Revision for the review (crawl dates, bias, calibration, annotation)
+
+`sbatch run_register_analysis.sh` reruns every register analysis with two
+changes: a `crawl` dating method (the crawl year as the publication year,
+for comparison with what crawl-date studies get), and 95% intervals from a
+bootstrap over websites instead of documents (documents from one website
+are not independent). The paper figures are then in `runs/paper_*/paper.pdf`
+(`paper_crawl` is new: htmldate vs crawl dates), the comparisons with
+htmldate in the job's log (`compare_trends.py`), the test diagnostics in
+`runs/test_diagnostics/`, and the annotation sample in
+`runs/annotation_sheet.csv` (to fill in) and `runs/annotation_key.csv`.
+After annotating: `python 15_score_annotation.py runs/annotation_sheet.csv runs/annotation_key.csv`.
 
 ### Registers
 
@@ -235,6 +251,17 @@ outputs above:
 - **The age of the sample** (CPU, a few minutes):
   `python 12_age_of_sample.py --predictions runs/predict_400m_meta_start_all --dated $DATA/hplt.dated.jsonl --results runs/age`
   → `runs/age/year_distribution.csv`, `runs/age/age_at_crawl.csv`, `runs/age/years.pdf`.
+  In the paper (section The Age of HPLT English, `fig:years` = `years.pdf`
+  uploaded as `figures/publication_years.pdf`, `tab:age`):
+  - `tab:age` and "33.9% / 19.2%" (classifier) and "33.8% / 18.3%"
+    (htmldate): the "Age at crawl, all crawls" table.
+  - Median publication year 2018, 36.6% up to 2015: the "Median publication
+    year" lines. 38.3% vs 42.3% in 2020–2025: the "publication period" table.
+  - "48–62% / 9–12% / 4–7% within the crawls of 2021–2025": the "Share six
+    or more years old by register and crawl year" table (ID, IP, MT; columns
+    2021–2025).
+  - Discussion, "in the 2024 crawls only 43.0% … and 19.2%": the "Age at
+    crawl by crawl year" table, classifier row 2024 (`share_0`, `share_6+`).
 
 ### The trained runs
 
