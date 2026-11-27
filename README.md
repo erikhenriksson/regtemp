@@ -20,6 +20,7 @@ how web registers change over time.
 | `8_undated_estimate.py` | estimates the classifier's accuracy on documents htmldate could not date |
 | `9_predict_years.py` | dates any HPLT file (e.g. all of `samples.jsonl`) with a trained classifier: most likely year, median, confidence, the full distribution over years; marks the htmldate-labelled lines and their split |
 | `11_plot_register_trends.py` | yearly register plots from step 10: one panel per main register, with its subregisters, or several dating methods compared |
+| `12_age_of_sample.py` | how old the sample's documents are: publication-year distribution, and age at crawl per main register and crawl year (classifier for the whole sample, htmldate for the dated documents) |
 | `10_register_trends.py` | shares of the main registers by publication period, with htmldate years, classifier years (most likely, median, summed probabilities) or both on the same documents; bootstrap intervals |
 | `0_time_fetch.py` | times retrieval as fast as the servers allow (cost of retrieving HTML) |
 | `classifier_common.py` | shared by 6–10: loading, split, baselines, metrics |
@@ -230,6 +231,10 @@ outputs above:
   year before 2004": the `documents` column of `runs/years_dated.csv`.
 - **ed never reaches the threshold**: `11_plot_register_trends.py` prints
   "IP: no document has ed; left out" for the dated documents.
+
+- **The age of the sample** (CPU, a few minutes):
+  `python 12_age_of_sample.py --predictions runs/predict_400m_meta_start_all --dated $DATA/hplt.dated.jsonl --results runs/age`
+  → `runs/age/year_distribution.csv`, `runs/age/age_at_crawl.csv`, `runs/age/years.pdf`.
 
 ### The trained runs
 
