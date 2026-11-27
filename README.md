@@ -25,6 +25,7 @@ how web registers change over time.
 | `classifier_common.py` | shared by 6–10: loading, split, baselines, metrics |
 | `score_all.sh` | test scores of every trained run, and the table of all runs |
 | `cue_table.py`, `period_table.py` | the paper's tables by date cue and by period |
+| `compare_trends.py` | compares yearly register shares from two dating methods on the same documents (mean difference, share inside the reference's interval) |
 | `count_left.py`, `count_dates.py`, `check_html.py` | counts and checks used for the paper |
 | `setup_lumi.sh` | environment for LUMI |
 
@@ -154,7 +155,7 @@ until `score_all.sh` is run again (not used in the paper).
 
 ### Register analysis
 
-In progress; nothing from here is in the paper yet. From here on, scripts run
+From here on, scripts run
 from the repo on LUMI (`/scratch/project_462001491/ehenriks/regtemp`) after
 `source setup_lumi.sh`, which sets `$DATA` to the data folder. Models and
 results are in the repo's `runs/` (not in git). The final model was copied
@@ -197,6 +198,38 @@ subregister above the threshold implies its main register ("HI re"); hybrids
 count towards each of their registers, so a period's shares add up to more
 than 100% (`classifier_common.register_labels`). `--level sub` gives the full
 labels (subregisters) instead of the nine main registers.
+
+**In the paper** (sections Register Analysis, Register Change, Register Trends
+with Text-Based Dates, and the appendix Register Shares by Period), from the
+outputs above:
+
+- **Figures `fig:registers`, `fig:registers-same`, `fig:registers-rest`**: the
+  `paper.pdf` of these three runs, uploaded to Overleaf as
+  `figures/registers_htmldate.pdf`, `figures/registers_same_documents.pdf` and
+  `figures/registers_rest_of_sample.pdf`:
+
+      python 11_plot_register_trends.py --line htmldate=runs/years_dated.csv:htmldate --sub runs/years_dated_sub.csv:htmldate --registers NA,IN,IP,ID --from-year 2000 --out runs/paper_dated
+      python 11_plot_register_trends.py --line htmldate=runs/years_heldout.csv:htmldate --line classifier=runs/years_heldout.csv:model_prob --line "most likely year=runs/years_heldout.csv:model" --registers NA,IN,IP,ID --from-year 2000 --out runs/paper_heldout
+      python 11_plot_register_trends.py --line "dated, htmldate=runs/years_dated.csv:htmldate" --line "rest of sample, classifier=runs/years_unlabelled.csv:model_prob" --registers NA,IN,IP,ID --from-year 2000 --out runs/paper_population
+
+- **Table `tab:register-shares`**: the `htmldate` table printed by the
+  `--docs dated` run (left) and the `model_prob` table printed by the
+  `--docs unlabelled` run (right), both with the default periods. The same
+  numbers are in `runs/registers_dated.csv` and `runs/registers_unlabelled.csv`.
+- **Table `tab:register-same`** (mean difference 1.0 / 1.6 / 1.8 points; in
+  interval 90 / 87 / 81%): `python compare_trends.py runs/years_heldout.csv --from-year 2000`
+  (`model_prob`, `model_median`, `model`).
+- **Yearly numbers in the text** (narrative 39% in 2000, 50% in 2009–2013,
+  20% in 2025; narrative blogs 15% in 2009; news reports 27% in 2013, 15% in
+  2025; opinion 21% in 2007, 8% in 2025; opinion blogs 8% in 2007;
+  interactive discussion 15–18% in 2003–2006; informational description 31%
+  in 2005, 63% in 2025; dtp 11% to 32%; persuasion under 3% in 2003–2005, 29%
+  in 2025; ds 24%; machine translated about 1% or less until 2015, 3–5% from
+  2018): the `htmldate` rows of `runs/years_dated.csv` and, for
+  subregisters, `runs/years_dated_sub.csv`. "Fewer than 300 documents a
+  year before 2004": the `documents` column of `runs/years_dated.csv`.
+- **ed never reaches the threshold**: `11_plot_register_trends.py` prints
+  "IP: no document has ed; left out" for the dated documents.
 
 ### The trained runs
 

@@ -17,8 +17,11 @@ documents are left out, and so is --min-year's own year (1995 by default)
 before --from-year, because 10_register_trends.py clips earlier years into
 it.
 
-Writes <register>.png and <register>.pdf into --out, and all.png with every
-panel.
+Subregisters that no document has (such as ed, which never reaches the
+threshold) are left out, and the script says so.
+
+Writes <register>.png and <register>.pdf into --out, all.png with every
+panel, and paper.pdf, the same at the width of a two-column page.
 
     python 11_plot_register_trends.py --line htmldate=runs/years_dated.csv:htmldate \\
         --sub runs/years_dated_sub.csv:htmldate --out runs/plots_dated
@@ -35,7 +38,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from matplotlib.ticker import MaxNLocator, PercentFormatter
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 import classifier_common as common
 
@@ -58,7 +61,7 @@ def read(spec, from_year, min_docs):
     return df[(df.year >= from_year) & (df.documents >= min_docs)]
 
 
-def end_labels(ax, ends, gap):
+def end_labels(ax, ends, gap, fs):
     """Labels at the right end of the lines, moved apart so they don't overlap."""
     ends = sorted(ends, key=lambda e: e[1])
     placed = []
@@ -72,12 +75,14 @@ def end_labels(ax, ends, gap):
             xytext=(4, 0),
             textcoords="offset points",
             va="center",
-            fontsize=8,
+            fontsize=fs,
             color=TEXT,
         )
 
 
-def panel(ax, register, lines, sub):
+def panel(ax, register, lines, sub, fs=8, legend=True):
+    """One register's panel; fs is the base font size. Returns the
+    subregisters left out because no document has them."""
     ends = []
     single = len(lines) == 1
     for i, (name, df) in enumerate(lines):
@@ -92,9 +97,13 @@ def panel(ax, register, lines, sub):
             ends.append(
                 (g.year.iloc[-1], g.share.iloc[-1], register if single else name)
             )
+    empty = []
     if sub is not None:
         for i, s in enumerate(common.TAXONOMY[register]):
             g = sub[sub.register == f"{register} {s}"].sort_values("year")
+            if not (g.share > 0).any():
+                empty.append(s)  # e.g. ed: never above the threshold
+                continue
             ax.plot(
                 g.year,
                 g.share,
@@ -105,22 +114,24 @@ def panel(ax, register, lines, sub):
             if len(g):
                 ends.append((g.year.iloc[-1], g.share.iloc[-1], s))
     ax.set_title(
-        f"{register}: {common.REGISTER_NAMES[register]}", loc="left", fontsize=11
+        f"{register}: {common.REGISTER_NAMES[register]}", loc="left", fontsize=fs + 2
     )
-    ax.set_ylim(0, ax.get_ylim()[1] * 1.15)  # headroom for the legend
-    ax.yaxis.set_major_formatter(PercentFormatter(1, decimals=None))
+    ax.set_ylim(0, ax.get_ylim()[1] * (1.15 if legend else 1.02))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"{100 * v:g}%"))
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(axis="y", color=GRID, lw=0.8)
     ax.set_axisbelow(True)
     for side in ["top", "right", "left"]:
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color(GRID)
-    ax.tick_params(colors=TEXT, labelsize=8, length=0)
-    if len(ax.get_lines()) > 1:
-        legend = ax.legend(fontsize=8, loc="best", framealpha=0.9, edgecolor="none")
-        legend.set_zorder(5)
-    end_labels(ax, ends, gap=0.04 * ax.get_ylim()[1])
+    ax.tick_params(colors=TEXT, labelsize=fs, length=0)
+    if legend and len(ax.get_lines()) > 1:
+        box = ax.legend(fontsize=fs, loc="best", framealpha=0.9, edgecolor="none")
+        box.set_zorder(5)
+    if legend or single:  # comparison lines meet at the end: legend only
+        end_labels(ax, ends, gap=0.045 * ax.get_ylim()[1], fs=fs)
     ax.set_xlim(right=ax.get_xlim()[1] + 1.5)  # room for the end labels
+    return empty
 
 
 def main():
@@ -163,15 +174,40 @@ def main():
             fig.savefig(os.path.join(args.out, f"{register}.{ext}"), dpi=200)
         plt.close(fig)
 
+    # all panels in one figure: all.png to look at, and paper.pdf at the
+    # width of a two-column page (figure*), with smaller type and without
+    # legends in the panels (subregisters are named at the end of their
+    # lines; a comparison gets one legend above the panels)
     rows = int(np.ceil(len(registers) / 2))
-    fig, axes = plt.subplots(rows, 2, figsize=(12, 3.2 * rows), squeeze=False)
-    for ax, register in zip(axes.flat, registers):
-        panel(ax, register, lines, sub)
-    for ax in axes.flat[len(registers) :]:
-        ax.set_visible(False)
-    fig.tight_layout()
-    fig.savefig(os.path.join(args.out, "all.png"), dpi=150)
-    print(f"Wrote {len(registers)} figures and all.png to {args.out}/")
+    empty = {}
+    for name, width, height, fs, legend in [
+        ("all.png", 12, 3.2, 8, True),
+        ("paper.pdf", 6.3, 2.1, 6, False),
+    ]:
+        fig, axes = plt.subplots(rows, 2, figsize=(width, height * rows), squeeze=False)
+        for ax, register in zip(axes.flat, registers):
+            empty[register] = panel(ax, register, lines, sub, fs=fs, legend=legend)
+        for ax in axes.flat[len(registers) :]:
+            ax.set_visible(False)
+        shared = not legend and len(lines) > 1
+        # a strip of 0.3 inches above the panels for the shared legend
+        fig.tight_layout(rect=(0, 0, 1, 1 - 0.3 / (height * rows) if shared else 1))
+        if shared:
+            handles, labels = axes.flat[0].get_legend_handles_labels()
+            fig.legend(
+                handles,
+                labels,
+                loc="upper center",
+                ncol=len(lines),
+                fontsize=fs + 1,
+                frameon=False,
+            )
+        fig.savefig(os.path.join(args.out, name), dpi=150)
+        plt.close(fig)
+    for register, subs in empty.items():
+        if subs:
+            print(f"{register}: no document has {', '.join(subs)}; left out")
+    print(f"Wrote {len(registers)} figures, all.png and paper.pdf to {args.out}/")
 
 
 if __name__ == "__main__":
