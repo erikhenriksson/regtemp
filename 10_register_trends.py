@@ -36,7 +36,9 @@ Dating methods, whichever the documents allow:
     model_prob      the predicted probabilities: a document counts in every
                     period, in proportion to its probability for that period
 
-Years are clipped below at --min-year, as in training, and htmldate years
+--periods takes periods such as "1995-2005,2006-2010", or "1995..2025" for
+one period per year (for 11_plot_register_trends.py). Years are clipped
+below at --min-year, as in training, and htmldate years
 after the crawl year are left out, as in classifier_common.load. The 95%
 intervals come from a Poisson bootstrap over documents: they show sampling
 uncertainty, not the classifier's dating error.
@@ -72,9 +74,14 @@ DEFAULT_PERIODS = "1995-2005,2006-2010,2011-2015,2016-2019,2020-2025"
 
 
 def parse_periods(spec):
-    """'1995-2005,2006' -> [('1995-2005', 1995, 2005), ('2006', 2006, 2006)]"""
+    """'1995-2005,2006' -> [('1995-2005', 1995, 2005), ('2006', 2006, 2006)];
+    '1995..1997' -> one period per year: 1995, 1996, 1997."""
     periods = []
     for part in spec.split(","):
+        if ".." in part:
+            lo, hi = map(int, part.split(".."))
+            periods += [(str(y), y, y) for y in range(lo, hi + 1)]
+            continue
         lo, _, hi = part.partition("-")
         periods.append((part, int(lo), int(hi or lo)))
     return periods

@@ -19,6 +19,7 @@ how web registers change over time.
 | `7_logreg_baseline.py` | TF-IDF + logistic regression baseline on the same split |
 | `8_undated_estimate.py` | estimates the classifier's accuracy on documents htmldate could not date |
 | `9_predict_years.py` | dates any HPLT file (e.g. all of `samples.jsonl`) with a trained classifier: most likely year, median, confidence, the full distribution over years; marks the htmldate-labelled lines and their split |
+| `11_plot_register_trends.py` | yearly register plots from step 10: one panel per main register, with its subregisters, or several dating methods compared |
 | `10_register_trends.py` | shares of the main registers by publication period, with htmldate years, classifier years (most likely, median, summed probabilities) or both on the same documents; bootstrap intervals |
 | `0_time_fetch.py` | times retrieval as fast as the servers allow (cost of retrieving HTML) |
 | `classifier_common.py` | shared by 6–10: loading, split, baselines, metrics |
@@ -175,6 +176,21 @@ there from `$DATA/runs/400m_meta_start_all` (without its checkpoints).
 - **The whole sample with classifier dates** (without the 150,000 labelled
   lines; a different population from the dated documents):
   `python 10_register_trends.py --predictions runs/predict_400m_meta_start_all --docs unlabelled --out runs/registers_unlabelled.csv`
+
+- **Yearly register plots.** First yearly shares (`--periods 1995..2025`),
+  then the plots (1995 itself is left out: older years are clipped into it):
+
+      python 10_register_trends.py --dated $DATA/hplt.dated.jsonl --docs dated --periods 1995..2025 --out runs/years_dated.csv
+      python 10_register_trends.py --dated $DATA/hplt.dated.jsonl --docs dated --level sub --periods 1995..2025 --out runs/years_dated_sub.csv
+      python 10_register_trends.py --dated $DATA/hplt.dated.jsonl --predictions runs/predict_400m_meta_start_all --docs heldout --periods 1995..2025 --out runs/years_heldout.csv
+      python 10_register_trends.py --predictions runs/predict_400m_meta_start_all --docs unlabelled --periods 1995..2025 --out runs/years_unlabelled.csv
+
+      # 1. htmldate dates, all dated documents, with subregisters
+      python 11_plot_register_trends.py --line htmldate=runs/years_dated.csv:htmldate --sub runs/years_dated_sub.csv:htmldate --out runs/plots_dated
+      # 2. the same documents dated two ways (dev and test)
+      python 11_plot_register_trends.py --line htmldate=runs/years_heldout.csv:htmldate --line classifier=runs/years_heldout.csv:model_prob --line "most likely year=runs/years_heldout.csv:model" --out runs/plots_heldout
+      # 3. dated documents (htmldate) against the rest of the sample (classifier)
+      python 11_plot_register_trends.py --line "dated, htmldate=runs/years_dated.csv:htmldate" --line "rest of the sample, classifier=runs/years_unlabelled.csv:model_prob" --out runs/plots_population
 
 Registers: every label with probability at least 0.4 (`--threshold`); a
 subregister above the threshold implies its main register ("HI re"); hybrids

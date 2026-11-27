@@ -33,6 +33,33 @@ TAXONOMY = {
     # news and opinion blog or editorial
     "IP": ["ds", "ed"],
 }
+REGISTER_NAMES = {
+    "MT": "machine translated or generated",
+    "LY": "lyrical",
+    "SP": "spoken",
+    "it": "interview",
+    "ID": "interactive discussion",
+    "NA": "narrative",
+    "ne": "news report",
+    "sr": "sports report",
+    "nb": "narrative blog",
+    "HI": "how-to or instructions",
+    "re": "recipe",
+    "IN": "informational description",
+    "en": "encyclopedia article",
+    "ra": "research article",
+    "dtp": "description of a thing or person",
+    "fi": "FAQ",
+    "lt": "legal terms and conditions",
+    "OP": "opinion",
+    "rv": "review",
+    "ob": "opinion blog",
+    "rs": "religious blog or sermon",
+    "av": "advice",
+    "IP": "informational persuasion",
+    "ds": "description with intent to sell",
+    "ed": "news and opinion blog or editorial",
+}
 ALL_REGISTERS = MAIN_REGISTERS + [s for subs in TAXONOMY.values() for s in subs]
 # every label a document can get, main registers alone and with a subregister
 FINE_REGISTERS = [
