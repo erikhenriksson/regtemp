@@ -228,3 +228,5 @@ data/
 # trained models and results, slurm logs
 runs/
 slurm-*.out
+
+.DS_Store
