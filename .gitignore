@@ -224,3 +224,7 @@ __marimo__/
 
 # old sample, not used
 data/
+
+# trained models and results, slurm logs
+runs/
+slurm-*.out

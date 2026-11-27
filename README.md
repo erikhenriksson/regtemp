@@ -132,21 +132,25 @@ rest run on CPU. On LUMI some scripts were run under other names
 
 ### Register analysis
 
-In progress; nothing from here is in the paper yet.
+In progress; nothing from here is in the paper yet. From here on, scripts run
+from the repo on LUMI (`/scratch/project_462001491/ehenriks/regtemp`) after
+`source setup_lumi.sh`, which sets `$DATA` to the data folder. Models and
+results are in the repo's `runs/` (not in git). The final model was copied
+there from `$DATA/runs/400m_meta_start_all` (without its checkpoints).
 
 - **Classifier dates for the 1M sample** (GPU, about 2 hours):
 
       sbatch --account=project_462001491 --partition=small-g --gpus-per-node=1 \
-          --cpus-per-task=7 --mem=60G --time=04:00:00 \
-          --wrap "source setup.sh && python 9_predict_years.py samples.jsonl \
+          --cpus-per-task=7 --mem=60G --time=04:00:00 --output=runs/predict_%j.out \
+          --wrap "source setup_lumi.sh && python 9_predict_years.py \$DATA/samples.jsonl \
           --trained runs/400m_meta_start_all/best_model \
-          --train-script 6_train_classifier3.py --results runs/predict_400m_meta_start_all"
+          --results runs/predict_400m_meta_start_all"
 
 - **Register shares by period, htmldate years** (all dated documents):
-  `python 10_register_trends.py --dated hplt.dated.jsonl --docs dated --out runs/registers_dated.csv`
+  `python 10_register_trends.py --dated $DATA/hplt.dated.jsonl --docs dated --out runs/registers_dated.csv`
 - **The same documents dated two ways** (dev and test: htmldate vs the
   classifier, the circularity check):
-  `python 10_register_trends.py --dated hplt.dated.jsonl --predictions runs/predict_400m_meta_start_all --docs heldout --out runs/registers_heldout.csv`
+  `python 10_register_trends.py --dated $DATA/hplt.dated.jsonl --predictions runs/predict_400m_meta_start_all --docs heldout --out runs/registers_heldout.csv`
 - **The whole sample with classifier dates** (without the 150,000 labelled
   lines; a different population from the dated documents):
   `python 10_register_trends.py --predictions runs/predict_400m_meta_start_all --docs unlabelled --out runs/registers_unlabelled.csv`
