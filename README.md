@@ -82,6 +82,20 @@ rest run on CPU. On LUMI some scripts were run under other names
 - **Split (83,285 / 10,307 / 10,342):** printed by `6_train_classifier.py`
   (hash of the document id, seed 42, `classifier_common.split_of`).
 
+### Registers
+
+Everywhere, a document's registers are those of
+`classifier_common.register_labels`: every label of HPLT's `web-register`
+field with probability at least 0.4, in the two-level taxonomy
+(`classifier_common.TAXONOMY`). A subregister above the threshold is one
+label with its main register ("HI re") and implies the main register; a
+hybrid ("HI re" and "ID") counts in full towards each of its registers, so
+register shares add up to more than 100%. `main_registers` gives the main
+registers only ("ID HI"). Per-register results computed before this rule
+(the most likely main register) are marked "to be redone" below.
+`by_register.csv` of the runs in the table below still uses the old rule
+until `score_all.sh` is run again (not used in the paper).
+
 ### Results
 
 - **Dating HPLT with htmldate** — 103,934 of 149,451 dated (69.5%); 33.8% in
@@ -91,15 +105,17 @@ rest run on CPU. On LUMI some scripts were run under other names
   (18.3%). `count_dates.py hplt.dated.jsonl` gives the same counts.
 - **How much of the date survives text extraction** (text and table
   `tab:text-dating`):
-  `python 5_summarize_dates.py text_dates.jsonl --by register --metrics metrics.csv --disagreements check.csv`.
+  `python 5_summarize_dates.py $DATA/text_dates.jsonl --by register --dated $DATA/hplt.dated.jsonl --metrics runs/metrics.csv --disagreements runs/check.csv`
+  (from the repo; registers by threshold, see "Registers" below).
   Table columns: Found = `found`, Year P = `P yr`, Year R = `R yr`, from the
   "All: all documents" table (rows `url/fast`, `text/fast`, `text/extensive`,
   `text+url/fast`, `text+url/extensive`, `baseline/crawl year`). 26.3% = "year
   of the HTML date appears in the text". 53.6% = `jan 1` and 39.1% = `no ref`
   of `text/extensive`. 3.0% = `R yr` of `text+url/fast` in the "URL gives no
-  date" table. Register sentences: "year appears in the text" line (NA 31.7%,
-  HI 10.9%, IP 15.5%) and `found` of `url/fast` (NA 20.1%, OP 17.2%, IP 2.3%,
-  ID 3.2%) in the per-register tables.
+  date" table. Register sentences: "year appears in the text" line and
+  `found` of `url/fast` in the per-register tables. **To be redone:** the
+  numbers in the paper (NA 31.7%, HI 10.9%, IP 15.5%; NA 20.1%, OP 17.2%,
+  IP 2.3%, ID 3.2%) used the most likely main register.
 - **Main classifier table (`tab:classifier`) and appendix table of all runs
   (`tab:all-runs`):** `./score_all.sh` → `runs/all_results.csv` (dev and
   test exact, within one year, MAE, bias for every run). The rows "Always the
@@ -121,9 +137,13 @@ rest run on CPU. On LUMI some scripts were run under other names
   `python period_table.py runs/test_400m_meta_start_all/predictions_test.csv --out runs/periods_test.csv`.
   The threshold 0.5 was chosen on the development set with the 150M model.
 - **Documents that htmldate could not date** (cue shares 5.6% / 55.7%,
-  register shares, confidence above 0.8: 13.0% vs 35.5%, estimates 54.6% and
-  48.5%):
-  `python 8_undated_estimate.py hplt.dated.jsonl --trained runs/400m_meta_start_all/best_model --train-script 6_train_classifier.py --results runs/undated_400m_meta_start_all`.
+  register shares in `registers.csv`, confidence above 0.8: 13.0% vs 35.5%,
+  estimates 54.6% and 48.5%):
+  `python 8_undated_estimate.py $DATA/hplt.dated.jsonl --trained runs/400m_meta_start_all/best_model --results runs/undated_400m_meta_start_all`
+  (from the repo, on a GPU node). **To be redone:** the register shares
+  (31% vs 9% narrative), the reweighted estimate (54.6%) and the 57–59% below
+  used the most likely main register; the cue shares and the confidence
+  estimate do not depend on registers.
   The 23.1% of test documents with a URL year = 13.4% + 9.7% from
   `tab:cues`. The **57–59% across all documents** is computed: 69.5% of the
   documents are dated, so 0.695 × 61.0 + 0.305 × 48.5 = 57.2 and
@@ -142,7 +162,7 @@ there from `$DATA/runs/400m_meta_start_all` (without its checkpoints).
 
       sbatch --account=project_462001491 --partition=small-g --gpus-per-node=1 \
           --cpus-per-task=7 --mem=60G --time=04:00:00 --output=runs/predict_%j.out \
-          --wrap "source setup_lumi.sh && python 9_predict_years.py \$DATA/samples.jsonl \
+          --wrap "source ./setup_lumi.sh && python 9_predict_years.py \$DATA/samples.jsonl \
           --trained runs/400m_meta_start_all/best_model \
           --results runs/predict_400m_meta_start_all"
 
@@ -155,8 +175,11 @@ there from `$DATA/runs/400m_meta_start_all` (without its checkpoints).
   lines; a different population from the dated documents):
   `python 10_register_trends.py --predictions runs/predict_400m_meta_start_all --docs unlabelled --out runs/registers_unlabelled.csv`
 
-Add `--registers threshold --threshold 0.4` for registers by threshold
-instead of the most likely main register.
+Registers: every label with probability at least 0.4 (`--threshold`); a
+subregister above the threshold implies its main register ("HI re"); hybrids
+count towards each of their registers, so a period's shares add up to more
+than 100% (`classifier_common.register_labels`). `--level sub` gives the full
+labels (subregisters) instead of the nine main registers.
 
 ### The trained runs
 

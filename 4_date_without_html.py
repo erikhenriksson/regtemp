@@ -14,9 +14,10 @@ settings as 3_date_html.py: original publication date, and the crawl date as
 the latest possible date. The HTML-based pub_date and pub_date_extensive
 are kept as the reference.
 
-Each document becomes one small JSON line: id, URL, language, main register,
-crawl date, the reference dates, and "dates" with one date (or null) per
-condition, e.g. "text/fast". "snippets" holds, for the year of every date
+Each document becomes one small JSON line: id, URL, language, main registers
+(classifier_common.main_registers: probability at least 0.4, "ID HI" for a
+hybrid), crawl date, the reference dates, and "dates" with one date (or null)
+per condition, e.g. "text/fast". "snippets" holds, for the year of every date
 found, the text around the first mention of that year in "text" (null if the
 year is not in the text), for checking the results by hand.
 
@@ -36,6 +37,8 @@ import markdown
 import zstandard
 from dateutil.parser import UnknownTimezoneWarning
 from htmldate import find_date
+
+from classifier_common import main_registers
 
 # htmldate's date parser warns about timezone names like "EDT"; harmless here.
 warnings.filterwarnings("ignore", category=UnknownTimezoneWarning)
@@ -107,11 +110,6 @@ def snippet(text, year, width=100):
     return text[start : match.end() + width].replace("\n", " / ")
 
 
-def main_register(doc):
-    scores = {k: v for k, v in (doc.get("web-register") or {}).items() if k.isupper()}
-    return max(scores, key=scores.get) if scores else None
-
-
 def test_document(line):
     doc = json.loads(line)
     crawl_date = doc["ts"][:10]
@@ -128,7 +126,7 @@ def test_document(line):
         "id": doc.get("id"),
         "u": doc["u"],
         "lang": (doc.get("openlid_v3") or {}).get("lang", [None])[0],
-        "register": main_register(doc),
+        "registers": main_registers(doc.get("web-register")),
         "crawl_date": crawl_date,
         "pub_date": doc.get("pub_date"),
         "pub_date_extensive": doc.get("pub_date_extensive"),

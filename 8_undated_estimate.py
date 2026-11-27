@@ -6,9 +6,12 @@ it in three ways, with a model trained by 6_train_classifier.py:
 
     1. Accuracy on test by date cue: whether the URL contains a year, whether
        the text mentions one, both, or neither.
-    2. Reweighting: accuracy on test for each combination of main register and
-       cue, weighted by how common each combination is among the undated
-       documents. This assumes accuracy depends mainly on register and cue.
+    2. Reweighting: accuracy on test for each combination of main registers
+       and cue, weighted by how common each combination is among the undated
+       documents. A document's main registers are those of
+       classifier_common.main_registers (probability at least 0.4); a hybrid
+       such as "ID HI" is its own combination. This assumes accuracy depends
+       mainly on registers and cue.
     3. Confidence: accuracy on test for each band of model confidence,
        weighted by how the undated documents fall into those bands. This
        assumes the model is as well calibrated on them as on test.
@@ -20,6 +23,9 @@ Prints the three, and writes into --results:
     confidence.csv         test accuracy and the share of test and undated
                            documents per confidence band
     estimates.csv          the estimates for the undated documents
+    registers.csv          the share of test and undated documents with each
+                           main register (a hybrid counts towards each), and
+                           the share of hybrids
     undated_predictions.csv  predicted year, median year and confidence of
                            every undated document
     hand_check_sample.csv  a random sample of undated documents (URL, crawl
@@ -67,7 +73,7 @@ def load_all(path, seed):
                 "crawl_year": int(doc["crawl_date"][:4]),
                 "crawl_date": doc["crawl_date"][:10],
                 "crawl_id": doc.get("crawl_id") or "",
-                "register": common.main_register(doc.get("web-register")),
+                "registers": common.main_registers(doc.get("web-register")),
             }
         )
     df = pd.DataFrame(rows)
@@ -186,12 +192,12 @@ def main():
         )
     by_cue = pd.DataFrame(by_cue)
 
-    # 2. reweighting by register x cue
+    # 2. reweighting by registers x cue
     cue_scores = {r.cue: r for r in by_cue.itertuples()}
-    weights = undated.groupby(["register", "cue"]).size() / len(undated)
+    weights = undated.groupby(["registers", "cue"]).size() / len(undated)
     estimate = {"exact": 0.0, "within_1": 0.0, "mae": 0.0}
-    for (register, c), w in weights.items():
-        g = test[(test.register == register) & (test.cue == c)]
+    for (registers, c), w in weights.items():
+        g = test[(test.registers == registers) & (test.cue == c)]
         s = (
             common.scores(g.year, g.pred_model)
             if len(g) >= args.min_cell
@@ -232,7 +238,7 @@ def main():
                 "within_1": test_all["within_1"],
                 "mae": test_all["mae"],
             },
-            {"estimate": "undated, reweighted by register x cue", **estimate},
+            {"estimate": "undated, reweighted by registers x cue", **estimate},
             {
                 "estimate": "undated, by confidence",
                 "exact": by_confidence,
@@ -242,14 +248,25 @@ def main():
         ]
     )
 
+    shares = pd.DataFrame(
+        {
+            name: {
+                r: common.has_register(d.registers, r).mean()
+                for r in common.MAIN_REGISTERS + ["none"]
+            }
+            | {"(hybrid)": (d.registers.str.split().str.len() > 1).mean()}
+            for name, d in (("test", test), ("undated", undated))
+        }
+    )
     by_cue.to_csv(res("by_cue.csv"), index=False)
+    shares.rename_axis("register").to_csv(res("registers.csv"))
     conf.to_csv(res("confidence.csv"), index=False)
     estimates.to_csv(res("estimates.csv"), index=False)
     cols = [
         "id",
         "url",
         "crawl_date",
-        "register",
+        "registers",
         "cue",
         "pred_model",
         "pred_model_median",
@@ -279,18 +296,11 @@ def main():
         .round(3)
         .to_string(index=False)
     )
-    print("\nMain registers, share of test and undated documents:")
     print(
-        pd.DataFrame(
-            {
-                "test": test.register.value_counts(normalize=True),
-                "undated": undated.register.value_counts(normalize=True),
-            }
-        )
-        .fillna(0)
-        .round(3)
-        .to_string()
+        "\nMain registers, share of test and undated documents "
+        "(a hybrid counts towards each):"
     )
+    print(shares.round(3).to_string())
     print("\n3. Confidence bands:")
     print(
         conf[["confidence", "share_test", "share_undated", "n", "exact", "within_1"]]

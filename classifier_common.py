@@ -14,6 +14,32 @@ import numpy as np
 import pandas as pd
 
 MAIN_REGISTERS = ["MT", "LY", "SP", "ID", "NA", "HI", "IN", "OP", "IP"]
+# The two-level register taxonomy of HPLT's web-register labels (TurkuNLP;
+# https://turkunlp.org/register-annotation-docs/abbreviations), without the
+# "other" subregisters, which HPLT's register classifier does not use.
+TAXONOMY = {
+    "MT": [],  # machine translated or generated
+    "LY": [],  # lyrical
+    "SP": ["it"],  # spoken: interview
+    "ID": [],  # interactive discussion
+    "NA": ["ne", "sr", "nb"],  # narrative: news, sports report, narrative blog
+    "HI": ["re"],  # how-to or instructions: recipe
+    # informational description: encyclopedia article, research article,
+    # description of a thing or person, FAQ, legal terms and conditions
+    "IN": ["en", "ra", "dtp", "fi", "lt"],
+    # opinion: review, opinion blog, religious blog or sermon, advice
+    "OP": ["rv", "ob", "rs", "av"],
+    # informational persuasion: description with intent to sell,
+    # news and opinion blog or editorial
+    "IP": ["ds", "ed"],
+}
+ALL_REGISTERS = MAIN_REGISTERS + [s for subs in TAXONOMY.values() for s in subs]
+# every label a document can get, main registers alone and with a subregister
+FINE_REGISTERS = [
+    label
+    for main, subs in TAXONOMY.items()
+    for label in [main] + [f"{main} {s}" for s in subs]
+]
 YEAR_IN_URL = re.compile(r"(?<!\d)(19[89]\d|20[0-4]\d)(?!\d)")
 SPLITS = {"train": 0.8, "dev": 0.1, "test": 0.1}
 
@@ -23,9 +49,31 @@ def website(url):
 
 
 def main_register(scores):
-    """The main register with the highest score, as in 5_summarize_dates.py."""
+    """The main register with the highest score, as in 5_summarize_dates.py.
+
+    Used for the per-register results of steps 5-8. The register analysis
+    uses register_labels instead (threshold, subregisters, hybrids)."""
     scores = {k: v for k, v in (scores or {}).items() if k in MAIN_REGISTERS}
     return max(scores, key=scores.get) if scores else "none"
+
+
+def register_labels(scores, threshold=0.4):
+    """A document's register labels, such as ["HI re", "ID"] for a hybrid.
+
+    Every label whose probability is at least the threshold. A subregister
+    is one label together with its main register ("HI re"): a subregister
+    above the threshold implies its main register, even if the main
+    register's own probability is lower. A main register stands alone
+    ("HI") only when none of its subregisters is above the threshold."""
+    scores = scores or {}
+    labels = []
+    for main, subs in TAXONOMY.items():
+        above = [s for s in subs if scores.get(s, 0) >= threshold]
+        if above:
+            labels += [f"{main} {s}" for s in above]
+        elif scores.get(main, 0) >= threshold:
+            labels.append(main)
+    return labels
 
 
 def split_of(doc_id, seed):

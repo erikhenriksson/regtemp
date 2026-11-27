@@ -26,14 +26,19 @@ HTML dates are spread over years before the crawl year.
 
 The first table covers all documents. The second covers only documents
 whose URL gives no date, showing what the extracted text adds on its own.
-With --by, both tables are printed per language or per main register.
+With --by, both tables are printed per language or per main register. A
+document has every main register of classifier_common.main_registers
+(probability at least 0.4; a subregister implies its main register), and a
+hybrid counts towards each of its registers. --dated takes the registers
+from the output of 3_date_html.py, for files written before
+4_date_without_html.py stored them.
 With --metrics, every row of every table is also saved to a CSV.
 
 With --disagreements, a CSV gets a random sample of the documents where a
 condition disagrees with the HTML date, or found a date without one, along
 with the text around the years involved, for checking by hand.
 
-    python 5_summarize_dates.py text_dates.jsonl --by lang \
+    python 5_summarize_dates.py text_dates.jsonl --by register --dated hplt.dated.jsonl \
         --metrics metrics.csv --disagreements check.csv
 """
 
@@ -42,6 +47,8 @@ import csv
 import json
 import random
 from collections import defaultdict
+
+from classifier_common import main_registers
 
 COLUMNS = [
     "found",
@@ -184,15 +191,15 @@ def write_disagreements(records, conditions, path, per_condition, seed):
                         "id": r["id"],
                         "url": r["u"],
                         "lang": r["lang"],
-                        "register": r["register"],
+                        "registers": r.get("registers"),
                         "crawl_date": r["crawl_date"],
                         "html_date": reference,
                         "html_date_extensive": r["pub_date_extensive"],
                         "found_date": found,
                         "found_snippet": r["snippets"].get(found[:4]),
-                        "html_snippet": r["snippets"].get(reference[:4])
-                        if reference
-                        else None,
+                        "html_snippet": (
+                            r["snippets"].get(reference[:4]) if reference else None
+                        ),
                     }
                 )
     with open(path, "w", encoding="utf-8", newline="") as out:
@@ -218,6 +225,9 @@ def main():
         default=200,
         help="skip groups with fewer documents (with --by)",
     )
+    parser.add_argument(
+        "--dated", help="output of 3_date_html.py, to take the registers from"
+    )
     parser.add_argument("--metrics", help="write every table row to a CSV")
     parser.add_argument("--disagreements", help="write a CSV of disagreements to check")
     parser.add_argument(
@@ -228,6 +238,15 @@ def main():
 
     with open(args.input, encoding="utf-8") as f:
         records = [json.loads(line) for line in f]
+    if args.dated:
+        registers = {}
+        for line in open(args.dated, encoding="utf-8"):
+            doc = json.loads(line)
+            registers[doc["id"]] = main_registers(doc.get("web-register"))
+        for r in records:
+            r["registers"] = registers[r["id"]]
+    if args.by == "register" and "registers" not in records[0]:
+        parser.error("this input has no registers; add --dated hplt.dated.jsonl")
     htmldate_conditions = list(records[0]["dates"])
     add_baselines(records)
     conditions = list(records[0]["dates"])
@@ -236,8 +255,10 @@ def main():
     report("All", records, conditions, rows)
     if args.by:
         groups = defaultdict(list)
-        for r in records:
-            groups[r[args.by]].append(r)
+        for r in records:  # a hybrid goes into each of its registers' groups
+            keys = r["registers"].split() if args.by == "register" else [r[args.by]]
+            for key in keys:
+                groups[key].append(r)
         for name, group in sorted(groups.items(), key=lambda g: -len(g[1])):
             if len(group) >= args.min_docs:
                 report(f"{args.by} = {name}", group, conditions, rows)

@@ -39,7 +39,9 @@ Writes, into --results:
                            bias (> 0: predicted too late). Subsets: all
                            documents, and documents whose website is or is not
                            in train
-    by_register.csv        the same per main register
+    by_register.csv        the same per main register (registers by
+                           classifier_common.main_registers: probability at
+                           least 0.4, a hybrid counts towards each)
     predictions_<split>.csv, probabilities_<split>.npy (one row per document,
                            one column per year in years.json), best_model/
 

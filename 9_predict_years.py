@@ -18,11 +18,9 @@ Writes, into --results:
                           "unlabelled" otherwise), pred_model (most likely
                           year), pred_model_median (median of the predicted
                           distribution), confidence (probability of the most
-                          likely year), register (main register, as in
-                          classifier_common.main_register), and reg_<label>:
-                          the register classifier's probability for every
-                          main register and subregister (passed through, not
-                          model inputs)
+                          likely year), and reg_<label>: the register
+                          classifier's probability for every main register
+                          and subregister (passed through, not model inputs)
     probabilities.npy   the predicted distribution: one row per document (the
                         same order), one column per year in years.json
     years.json          the years of the columns
@@ -31,13 +29,13 @@ Writes, into --results:
     python 9_predict_years.py samples.jsonl --trained runs/400m_meta_start_all/best_model \\
         --results runs/predict_400m_meta_start_all
 
-On LUMI (one GPU device; 1M documents take about 2 hours):
+On LUMI, from the repo (one GPU device; 1M documents take about 2 hours):
 
     sbatch --account=project_462001491 --partition=small-g --gpus-per-node=1 \\
-        --cpus-per-task=7 --mem=60G --time=04:00:00 \\
-        --wrap "source setup.sh && python 9_predict_years.py samples.jsonl \\
+        --cpus-per-task=7 --mem=60G --time=04:00:00 --output=runs/predict_%j.out \\
+        --wrap "source ./setup_lumi.sh && python 9_predict_years.py \\$DATA/samples.jsonl \\
         --trained runs/400m_meta_start_all/best_model \\
-        --train-script 6_train_classifier3.py --results runs/predict_400m_meta_start_all"
+        --results runs/predict_400m_meta_start_all"
 """
 
 import argparse
@@ -118,7 +116,6 @@ def to_frame(chunk, labelled, seed):
                     if line_no < labelled
                     else "unlabelled"
                 ),
-                "register": common.main_register(registers),
             }
             | {f"reg_{k}": v for k, v in registers.items()}
         )

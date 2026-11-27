@@ -1,9 +1,23 @@
-"""Shares of the main registers by publication period.
+"""Shares of the registers by publication period.
 
-For a set of documents, counts how the main registers (MT, LY, SP, ID, NA,
-HI, IN, OP, IP) are spread over publication periods, with the publication
-year from htmldate, from the date classifier, or both. Each register's share
-in a period is the share of that period's documents that have the register.
+For a set of documents, counts how the registers are spread over
+publication periods, with the publication year from htmldate, from the date
+classifier, or both. Each register's share in a period is the share of that
+period's documents that have the register.
+
+Registers follow the two-level taxonomy of HPLT's web-register labels
+(classifier_common.TAXONOMY and register_labels). A document has every label
+whose probability is at least --threshold (0.4). A subregister above the
+threshold is one label with its main register ("HI re"), and it implies the
+main register even when the main register's own probability is lower.
+Hybrids (such as "HI re" and "ID") count towards every register they have,
+so the shares of a period add up to more than 100%; "(none)" is the share
+of documents with no label above the threshold.
+
+--level main (default) counts the nine main registers: NA covers "NA",
+"NA ne", "NA sr" and "NA nb", and a document with "NA ne" and "NA nb"
+counts once. --level sub counts the full labels: there, "NA" means a
+narrative without a subregister above the threshold.
 
 Documents (--docs):
 
@@ -22,21 +36,17 @@ Dating methods, whichever the documents allow:
     model_prob      the predicted probabilities: a document counts in every
                     period, in proportion to its probability for that period
 
-A document's register (--registers): argmax, the main register with the
-highest probability (classifier_common.main_register; shares add up to 100%),
-or threshold, every main register whose probability is at least --threshold
-(a document can have several or none; "(none)" is the share with none).
-
 Years are clipped below at --min-year, as in training, and htmldate years
 after the crawl year are left out, as in classifier_common.load. The 95%
 intervals come from a Poisson bootstrap over documents: they show sampling
 uncertainty, not the classifier's dating error.
 
-Prints a table per method (shares in %, rows = periods), and with htmldate
-and a model method on the same documents, their difference in percentage
-points. Writes --out, one row per method, period and register: documents
+Prints a table per method (shares in %, one column per period), and with
+htmldate and a model method on the same documents, their difference in
+percentage points. Writes --out, one row per method, period and register: documents
 (the period's number of documents, summed probability for model_prob),
-share, low and high.
+share, low and high. Read it with pandas.read_csv(..., keep_default_na=False),
+or pandas turns the register NA into a missing value.
 
     python 10_register_trends.py --dated hplt.dated.jsonl --docs dated \\
         --out runs/registers_dated.csv
@@ -57,7 +67,7 @@ import pandas as pd
 
 import classifier_common as common
 
-REGISTERS = common.MAIN_REGISTERS
+REGISTERS = common.ALL_REGISTERS  # the 25 labels of the web-register field
 DEFAULT_PERIODS = "1995-2005,2006-2010,2011-2015,2016-2019,2020-2025"
 
 
@@ -99,6 +109,7 @@ def load_dated(path, seed, min_year):
 def load_predictions(folder):
     df = pd.read_csv(os.path.join(folder, "predictions.csv"))
     df = df.rename(columns={f"reg_{r}": r for r in REGISTERS})
+    df = df.reindex(columns=list(df.columns) + [r for r in REGISTERS if r not in df])
     df["row"] = np.arange(len(df))  # row in probabilities.npy
     probs = np.load(os.path.join(folder, "probabilities.npy"))
     years = np.array(json.load(open(os.path.join(folder, "years.json"))))
@@ -152,16 +163,22 @@ def select(args):
     return df, weights, periods
 
 
-def membership(df, how, threshold):
-    """documents x registers: 1 where the document has the register."""
-    scores = df[REGISTERS].to_numpy(float)
-    if how == "argmax":
-        member = np.zeros_like(scores)
-        member[np.arange(len(scores)), scores.argmax(1)] = 1
-        return member, REGISTERS
-    member = (scores >= threshold).astype(float)
-    none = (member.sum(1) == 0).astype(float)[:, None]
-    return np.hstack([member, none]), REGISTERS + ["(none)"]
+def membership(df, level, threshold):
+    """documents x registers: 1 where the document has the register, and the
+    share of documents that are hybrids (two or more main registers)."""
+    labels = [
+        common.register_labels(scores, threshold)
+        for scores in df[REGISTERS].to_dict("records")
+    ]
+    mains = [{label.split()[0] for label in doc} for doc in labels]
+    names = common.MAIN_REGISTERS if level == "main" else common.FINE_REGISTERS
+    column = {name: j for j, name in enumerate(names + ["(none)"])}
+    member = np.zeros((len(df), len(column)))
+    for i, doc in enumerate(mains if level == "main" else labels):
+        for label in doc or ["(none)"]:
+            member[i, column[label]] = 1
+    hybrid = np.mean([len(m) > 1 for m in mains])
+    return member, list(column), hybrid
 
 
 def shares(w, member, v=None):
@@ -197,7 +214,7 @@ def main():
         choices=["dated", "dev", "test", "heldout", "sample", "unlabelled"],
     )
     ap.add_argument("--out", required=True, help="CSV of all shares and intervals")
-    ap.add_argument("--registers", choices=["argmax", "threshold"], default="argmax")
+    ap.add_argument("--level", choices=["main", "sub"], default="main")
     ap.add_argument("--threshold", type=float, default=0.4)
     ap.add_argument("--periods", default=DEFAULT_PERIODS)
     ap.add_argument("--min-year", type=int, default=1995)
@@ -206,9 +223,12 @@ def main():
     args = ap.parse_args()
 
     df, weights, periods = select(args)
-    member, labels = membership(df, args.registers, args.threshold)
+    member, labels, hybrid = membership(df, args.level, args.threshold)
     names = [name for name, _, _ in periods]
-    print(f"{len(df)} documents ({args.docs}), registers by {args.registers}")
+    print(
+        f"{len(df)} documents ({args.docs}), {args.level} registers at threshold "
+        f"{args.threshold}; {hybrid:.1%} are hybrids (two or more main registers)"
+    )
     rng = np.random.default_rng(0)
     rows, tables = [], {}
     pd.set_option("display.width", 160)
@@ -222,7 +242,8 @@ def main():
                     {
                         "docs": args.docs,
                         "method": method,
-                        "registers": args.registers,
+                        "level": args.level,
+                        "threshold": args.threshold,
                         "period": period,
                         "register": register,
                         "documents": docs[i],
@@ -231,10 +252,16 @@ def main():
                         "high": high[i, j],
                     }
                 )
-        table = pd.DataFrame(100 * point, index=names, columns=labels)
+        table = pd.DataFrame(100 * point.T, index=labels, columns=names)
         tables[method] = table
         print(f"\n{method}: share of each period's documents (%)")
-        print(table.assign(documents=docs.round()).round(1).to_string())
+        shown = pd.concat(
+            [
+                table.round(1),
+                pd.DataFrame([docs.round()], index=["documents"], columns=names),
+            ]
+        )
+        print(shown.to_string())
         if outside > 0.5:
             print(f"({outside:.0f} documents fall outside the periods)")
     if "htmldate" in tables:
