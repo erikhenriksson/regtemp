@@ -48,15 +48,6 @@ def website(url):
     return (urlsplit(url).hostname or "").lower().removeprefix("www.")
 
 
-def main_register(scores):
-    """The main register with the highest score, as in 5_summarize_dates.py.
-
-    Used for the per-register results of steps 5-8. The register analysis
-    uses register_labels instead (threshold, subregisters, hybrids)."""
-    scores = {k: v for k, v in (scores or {}).items() if k in MAIN_REGISTERS}
-    return max(scores, key=scores.get) if scores else "none"
-
-
 def register_labels(scores, threshold=0.4):
     """A document's register labels, such as ["HI re", "ID"] for a hybrid.
 
@@ -74,6 +65,18 @@ def register_labels(scores, threshold=0.4):
         elif scores.get(main, 0) >= threshold:
             labels.append(main)
     return labels
+
+
+def main_registers(scores, threshold=0.4):
+    """The main registers of a document's register_labels, as a string in
+    taxonomy order ("ID HI" for a hybrid), or "none" if it has none."""
+    labels = register_labels(scores, threshold)
+    return " ".join(dict.fromkeys(label.split()[0] for label in labels)) or "none"
+
+
+def has_register(registers, register):
+    """For a column of main_registers strings: which documents have the register."""
+    return registers.str.split().map(lambda regs: register in regs)
 
 
 def split_of(doc_id, seed):
@@ -102,7 +105,7 @@ def load(path, seed, min_year):
                 "crawl_year": int(doc["crawl_date"][:4]),
                 "crawl_date": doc["crawl_date"][:10],
                 "crawl_id": doc.get("crawl_id") or "",
-                "register": main_register(doc.get("web-register")),
+                "registers": main_registers(doc.get("web-register")),
             }
         )
     df = pd.DataFrame(rows)
@@ -188,9 +191,11 @@ def report(df, split, methods, train_websites):
         for name, d in subsets.items()
         for m in methods
     ]
-    by_register = [
+    groups = {r: df[has_register(df.registers, r)] for r in MAIN_REGISTERS + ["none"]}
+    by_register = [  # a hybrid counts towards each of its registers
         {"split": split, "register": r, "method": m} | scores(g.year, g[f"pred_{m}"])
-        for r, g in df.groupby("register")
+        for r, g in groups.items()
+        if len(g)
         for m in methods
     ]
     print(

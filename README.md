@@ -32,8 +32,9 @@ how web registers change over time.
 All commands run on LUMI in `/scratch/project_462001491/ehenriks/data/eng-1M`,
 after `source setup_lumi.sh`. GPU steps need a LUMI-G node (one GCD); the
 rest run on CPU. On LUMI some scripts were run under other names
-(`6_train_classifier2.py`, `6_train_classifier3.py`); the repo's
-`6_train_classifier.py` is the latest version of the same script.
+(`6_train_classifier2.py`, `6_train_classifier3.py`, `6_train_classifier4.py`;
+the final model `400m_meta_start_all` was trained with `6_train_classifier4.py`);
+the repo's `6_train_classifier.py` is the latest version of the same script.
 
 ### Data files
 

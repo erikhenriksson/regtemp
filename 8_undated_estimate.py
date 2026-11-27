@@ -31,8 +31,8 @@ Prints the three, and writes into --results:
     hand_check_sample.csv  a random sample of undated documents (URL, crawl
                            date, prediction, start of the text) to date by hand
 
-    python 8_undated_estimate.py hplt.dated.jsonl --trained runs/400m_meta_start_all/best_model \\
-        --train-script 6_train_classifier3.py --results runs/undated_400m_meta_start_all
+    python 8_undated_estimate.py $DATA/hplt.dated.jsonl \\
+        --trained runs/400m_meta_start_all/best_model --results runs/undated_400m_meta_start_all
 """
 
 import argparse
