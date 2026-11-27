@@ -1,4 +1,4 @@
-"""Summarize the output of test_text_dates.py.
+"""Summarize the output of 4_date_without_html.py.
 
 The reference is pub_date, htmldate's fast mode on the original HTML. Only
 documents with an HTML date count towards precision and recall, as in
@@ -33,7 +33,7 @@ With --disagreements, a CSV gets a random sample of the documents where a
 condition disagrees with the HTML date, or found a date without one, along
 with the text around the years involved, for checking by hand.
 
-    python summarize_text_dates.py text_dates.jsonl --by lang \
+    python 5_summarize_dates.py text_dates.jsonl --by lang \
         --metrics metrics.csv --disagreements check.csv
 """
 
@@ -208,7 +208,7 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("input", help="output of test_text_dates.py")
+    parser.add_argument("input", help="output of 4_date_without_html.py")
     parser.add_argument(
         "--by", choices=["lang", "register"], help="one report per group"
     )

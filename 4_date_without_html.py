@@ -1,6 +1,6 @@
 """Test how well htmldate dates documents without their original HTML.
 
-Reads the output of date_html.py and runs htmldate on the fields that HPLT
+Reads the output of 3_date_html.py and runs htmldate on the fields that HPLT
 documents have even when the HTML is gone:
 
     url        the URL alone, with an empty page
@@ -10,7 +10,7 @@ documents have even when the HTML is gone:
     text+url   the "text" field together with the URL
 
 Each condition runs in htmldate's fast and extensive mode, with the same
-settings as date_html.py: original publication date, and the crawl date as
+settings as 3_date_html.py: original publication date, and the crawl date as
 the latest possible date. The HTML-based pub_date and pub_date_extensive
 are kept as the reference.
 
@@ -20,7 +20,7 @@ condition, e.g. "text/fast". "snippets" holds, for the year of every date
 found, the text around the first mention of that year in "text" (null if the
 year is not in the text), for checking the results by hand.
 
-    python test_text_dates.py hplt.dated.jsonl --out text_dates.jsonl --workers 4
+    python 4_date_without_html.py hplt.dated.jsonl --out text_dates.jsonl --workers 4
 """
 
 import argparse
@@ -149,7 +149,7 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("input", help="output of date_html.py (.jsonl or .jsonl.zst)")
+    parser.add_argument("input", help="output of 3_date_html.py (.jsonl or .jsonl.zst)")
     parser.add_argument("--out", required=True, help="output .jsonl file")
     parser.add_argument("--workers", type=int, default=4, help="parallel processes")
     args = parser.parse_args()

@@ -1,9 +1,12 @@
 """Add the original HTML to every document in an HPLT jsonl file.
 
 Documents from Common Crawl are fetched from data.commoncrawl.org with a
-byte-range request, falling back to Common Crawl's URL index when HPLT's
-file name or offset is wrong. Other documents (Internet Archive crawls) are
-fetched from the Wayback Machine. Run the same command again to resume.
+byte-range request. When HPLT's file name or offset is wrong, the page is
+looked up in the crawl's URL index: first in the index files on the same data
+server (through the crawl's cluster.idx, downloaded once per crawl), and only
+if that fails, on the much slower index server. Other documents (Internet
+Archive crawls) are fetched from the Wayback Machine. Run the same command
+again to resume.
 
     python fetch_html.py hplt.jsonl.zst --out hplt.html.jsonl
 
@@ -26,10 +29,12 @@ import time
 import urllib.parse
 
 import requests
+import surt
 import zstandard
 from warcio.archiveiterator import ArchiveIterator
 
 CC_URL = "https://data.commoncrawl.org/"
+INDEX_FILES_URL = CC_URL + "cc-index/collections/{crawl}/indexes/"
 INDEX_URL = "https://index.commoncrawl.org/"
 WAYBACK_URL = "https://web.archive.org/web/"
 USER_AGENT = "hplt-html-fetch/0.1 (research; one request at a time)"
@@ -41,6 +46,7 @@ BASE_PAUSE = {
 }  # seconds between requests
 MAX_PAUSE = 10
 GIVE_UP_AFTER = 30 * 60
+BROKEN_TRIES = 5  # broken responses for one page before giving up on it
 
 
 def result(
@@ -63,6 +69,37 @@ def decode(content, encoding):
         return content.decode("utf-8", errors="replace")
 
 
+def line_at_or_after(f, pos):
+    """The first complete line that starts at or after byte pos, and its start."""
+    if pos == 0:
+        f.seek(0)
+    else:
+        f.seek(pos - 1)
+        f.readline()  # to the end of the line that byte pos - 1 belongs to
+    start = f.tell()
+    return start, f.readline()
+
+
+def last_line_up_to(f, key):
+    """In a file of lines sorted by their first field, the last line whose first
+    field is <= key (bytes), or None. A binary search over byte offsets, so the
+    file is never read into memory."""
+    lo, hi = 0, os.fstat(f.fileno()).st_size
+    while lo < hi:  # find where the first line with a larger key starts
+        mid = (lo + hi) // 2
+        _, line = line_at_or_after(f, mid)
+        if line and line.split(b"\t", 1)[0] <= key:
+            lo = mid + 1
+        else:
+            hi = mid
+    start, _ = line_at_or_after(f, lo)
+    if start == 0:
+        return None
+    back = max(0, start - 65536)  # the line before it ends at start
+    f.seek(back)
+    return f.read(start - back).splitlines()[-1]
+
+
 class Fetcher:
     def __init__(self, cache_dir, use_wayback=True, direct_only=False):
         self.session = requests.Session()
@@ -72,6 +109,7 @@ class Fetcher:
         self.direct_only = direct_only
         self.pause = dict(BASE_PAUSE)
         self.file_lists = {}
+        self.cluster_indexes = {}
 
     def fetch(self, doc):
         """Return the fields to add to doc, or None to leave it for a later run."""
@@ -95,8 +133,16 @@ class Fetcher:
             return None
 
         # Some HPLT rows point to files Common Crawl doesn't have (".warc.23.gz"),
-        # or to the wrong place in a file. Then we ask Common Crawl's index.
-        location = self.lookup_index(doc)
+        # or to the wrong place in a file. Then we look the page up in Common
+        # Crawl's index, on the fast data server if we can.
+        location = self.lookup_index_files(doc)
+        if location is None:
+            print(
+                f"  {doc['id']}: not in the index files, asking the index server",
+                file=sys.stderr,
+                flush=True,
+            )
+            location = self.lookup_index(doc)
         if location is None:
             return result(error=f"{error}; not in the index either")
         page, error = self.read_record(doc, *location, source="commoncrawl-index")
@@ -124,8 +170,77 @@ class Fetcher:
         last_modified = headers.get_header("Last-Modified") if headers else None
         return result(decode(body, doc.get("de")), source, last_modified), None
 
+    def lookup_index_files(self, doc):
+        """Find this exact capture in the crawl's index files: (url, offset, length).
+
+        The index is sorted by URL key and timestamp, and stored in gzipped blocks
+        of about 3000 lines. cluster.idx lists the first key of every block and
+        where the block is, so one search in it and one small request to the data
+        server find the capture.
+        """
+        cluster = self.cluster_index(doc["crawl_id"])
+        if cluster is None:
+            return None
+        timestamp = re.sub(r"\D", "", doc["ts"])[:14]
+        try:
+            key = f"{surt.surt(doc['u'])} {timestamp}"
+        except Exception:  # a URL surt cannot parse
+            return None
+        line = last_line_up_to(cluster, key.encode())
+        if line is None:
+            return None
+        cdx_file, offset, length = line.decode().split("\t")[1:4]
+        start, end = int(offset), int(offset) + int(length) - 1
+        response, error = self.get(
+            "commoncrawl",
+            INDEX_FILES_URL.format(crawl=doc["crawl_id"]) + cdx_file,
+            ok=206,
+            headers={"Range": f"bytes={start}-{end}"},
+        )
+        if error:
+            return None
+        data = response.content
+        if data.startswith(b"\x1f\x8b"):  # requests may have unzipped it
+            data = gzip.decompress(data)
+
+        # Lines look like: <url key> <timestamp> {"url": ..., "filename": ...}
+        captures = [
+            json.loads(cdx_line.split(" ", 2)[2])
+            for cdx_line in data.decode("utf-8", errors="replace").splitlines()
+            if cdx_line.startswith(key + " ")
+        ]
+        # Several URLs can share a key (http and https, with or without www).
+        captures.sort(key=lambda capture: capture.get("url") != doc["u"])
+        for capture in captures:
+            if "filename" in capture:
+                return (
+                    CC_URL + capture["filename"],
+                    int(capture["offset"]),
+                    int(capture["length"]),
+                )
+        return None
+
+    def cluster_index(self, crawl_id):
+        """The crawl's cluster.idx as an open file, downloaded once; None if missing."""
+        if crawl_id not in self.cluster_indexes:
+            cached = os.path.join(self.cache_dir, crawl_id + ".cluster.idx")
+            if not os.path.exists(cached):
+                print(f"  downloading cluster.idx for {crawl_id}", file=sys.stderr)
+                response, error = self.get(
+                    "commoncrawl",
+                    INDEX_FILES_URL.format(crawl=crawl_id) + "cluster.idx",
+                )
+                if error:
+                    self.cluster_indexes[crawl_id] = None
+                    return None
+                with open(cached + ".tmp", "wb") as f:
+                    f.write(response.content)
+                os.replace(cached + ".tmp", cached)
+            self.cluster_indexes[crawl_id] = open(cached, "rb")
+        return self.cluster_indexes[crawl_id]
+
     def lookup_index(self, doc):
-        """Find this exact capture in the crawl's URL index: (url, offset, length)."""
+        """Find this exact capture with the (slow) index server: (url, offset, length)."""
         query = urllib.parse.urlencode({"url": doc["u"], "output": "json"})
         response, error = self.get(
             "index", f"{INDEX_URL}{doc['crawl_id']}-index?{query}"
@@ -211,9 +326,26 @@ class Fetcher:
     def get(self, server, url, headers=None, ok=200, permanent=(404, 416)):
         """GET politely. Returns (response, None) or (None, error message)."""
         waited = 0
+        broken = 0
         for attempt in itertools.count():
             try:
                 response = self.session.get(url, headers=headers, timeout=60)
+            except (
+                requests.exceptions.ChunkedEncodingError,
+                requests.exceptions.ContentDecodingError,
+            ) as e:
+                # The response broke off midway. This tends to happen again and
+                # again with the same page, so after a few tries we give up on
+                # this page rather than stopping the whole run.
+                response, reason = None, type(e).__name__
+                broken += 1
+                if broken >= BROKEN_TRIES:
+                    print(
+                        f"  {server}: {reason} {broken} times, giving up on this page",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return None, reason
             except requests.RequestException as e:
                 response, reason = None, type(e).__name__
             else:

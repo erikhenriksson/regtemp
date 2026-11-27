@@ -1,4 +1,4 @@
-"""Add publication dates from htmldate to the output of fetch_html.py.
+"""Add publication dates from htmldate to the output of 2_select_good.py.
 
 Each document gets three new fields:
 
@@ -11,7 +11,7 @@ update), use the document's URL, and treat the crawl date as the latest
 possible date. Dates are YYYY-MM-DD, or null if htmldate found none or the
 document has no HTML. All input fields are kept, in the same order.
 
-    python date_html.py hplt.html.jsonl --out hplt.dated.jsonl --workers 4
+    python 3_date_html.py hplt.good.jsonl --out hplt.dated.jsonl --workers 4
 """
 
 import argparse
@@ -64,7 +64,7 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("input", help="output of fetch_html.py (.jsonl or .jsonl.zst)")
+    parser.add_argument("input", help="output of 2_select_good.py (.jsonl or .jsonl.zst)")
     parser.add_argument("--out", required=True, help="output .jsonl file")
     parser.add_argument("--workers", type=int, default=4, help="parallel processes")
     args = parser.parse_args()
